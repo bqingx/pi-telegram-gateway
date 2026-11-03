@@ -59,13 +59,14 @@ async function main() {
     if (webhook.url) throw new Error('Webhook configured: remove it explicitly before polling');
     gateway = new Gateway({ state, telegram, backend: new PiBackend(config.cwd, config.dataDir),
       allowedUsers: config.allowedUsers, maxActive: config.maxActive ?? 4 });
+    await telegram.registerCommands();
     await gateway.recover();
     console.log('Gateway ready (private topics; allowlist enforced).');
     let failures = 0;
     while (!stopping) {
       let updates;
       try {
-        updates = await telegram.call('getUpdates', { offset: state.data.offset, timeout: 25, allowed_updates: ['message'] }, controller.signal);
+        updates = await telegram.call('getUpdates', { offset: state.data.offset, timeout: 25, allowed_updates: ['message', 'callback_query'] }, controller.signal);
         failures = 0;
       } catch {
         if (stopping) break;

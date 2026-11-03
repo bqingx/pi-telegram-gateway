@@ -8,7 +8,7 @@ A standalone Telegram gateway for [pi](https://github.com/earendil-works/pi). In
 
 ## Status
 
-Early **0.1.0** implementation. Automated fake-Telegram routing tests and a real SDK session-storage smoke test pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
+Early **0.2.0** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
 
 ## Install
 
@@ -50,13 +50,28 @@ No public port or webhook is needed. Model calls can incur your provider's norma
 |---|---|
 | Plain text in root DM / General | Create a new topic and session, answer there |
 | Plain text in a topic | Continue that topic's session; bind a new one if needed |
-| `/help`, `/start` | Help; never creates a topic |
+| `/help`, `/start` | Help and settings buttons if a session is bound; never creates a topic |
+| `/menu` | Current model/thinking and inline settings buttons |
+| `/model`, `/models` | Provider → paginated models → confirmation buttons |
+| `/thinking`, `/reasoning` | Supported reasoning-effort buttons (current level marked ✓) |
 | `/topic` | Topic: current binding. Root: session list |
 | `/topic <session-id>` | Restore a session in this topic; replay its latest assistant text |
 | `/sessions [page]` | List this user's gateway sessions in this chat (10/page) |
 | `/new` | Fresh session in the same topic; retain old session |
 | `/status` | Binding and in-process running/idle state |
 | `/stop` | Abort this topic's run; does not undo tool effects |
+
+### Button-based model and reasoning settings
+
+On startup the gateway registers Telegram's built-in **command menu** and sets the chat menu button to commands. Pick **menu**, **model** or **thinking** from that menu without typing model names/IDs or effort values. Inside a topic, `/menu` also opens inline **Model / Thinking** buttons. Use `/new` or send a message first if the topic has no session.
+
+The model picker lists only providers/models currently available through the pi SDK (including configured compatible endpoints), offers pagination/back/close buttons and marks the current selection. Choosing a model opens a confirmation showing catalog token prices when available and a reminder that future prompts send this conversation's context to the chosen provider. This is an estimate, not a billing guarantee; switching alone sends no model prompt. Actual provider availability, quota and pricing can still change.
+
+Thinking choices come from `getAvailableThinkingLevels()` rather than a hardcoded list; the provider may further clamp them. A nonreasoning model reports that reasoning is not adjustable. Model switches can reset/clamp effort, and the success message shows the actual SDK value.
+
+Changes are persisted **only to the current session**, not global pi defaults or other topics. Empty `/new` sessions restore their choice too. An unavailable saved model fails closed rather than silently submitting to a fallback provider; restore its local pi configuration/credentials before continuing.
+
+Pickers are bound to their requesting user, chat, topic, message and session. They expire after ten minutes, after a new prompt/session switch, or on restart; older pages cannot apply a stale selection. Open a fresh menu if settings changed elsewhere. Running sessions reject settings changes. `callback_query` updates are authenticated independently, and confirmation/error messages never include raw SDK exceptions. Do not run another service that overwrites this bot's command menu.
 
 A session already bound to another topic cannot be restored here. Use `/new` there first to release its old binding. Sessions are scoped to this gateway's bot, chat and user; arbitrary local session paths cannot be opened remotely. Existing CLI sessions are **not** imported automatically.
 

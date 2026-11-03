@@ -30,6 +30,31 @@ export class Telegram {
       await this.call('sendMessage', { chat_id: chat, ...(thread ? { message_thread_id: thread } : {}), text: part });
     }
   }
+  async panel(chat, thread, text, keyboard) {
+    return this.call('sendMessage', { chat_id: chat, ...(thread ? { message_thread_id: thread } : {}),
+      text, reply_markup: { inline_keyboard: keyboard } });
+  }
+  async editPanel(chat, message, text, keyboard = []) {
+    return this.call('editMessageText', { chat_id: chat, message_id: message, text,
+      reply_markup: { inline_keyboard: keyboard } });
+  }
+  async answer(query, text = '') {
+    return this.call('answerCallbackQuery', { callback_query_id: query, text });
+  }
+  async registerCommands() {
+    await this.call('setMyCommands', { commands: [
+      { command: 'menu', description: 'Session settings / 会话设置' },
+      { command: 'model', description: 'Choose model / 选择模型' },
+      { command: 'thinking', description: 'Reasoning effort / 推理强度' },
+      { command: 'sessions', description: 'List sessions / 会话列表' },
+      { command: 'new', description: 'Fresh session in this topic' },
+      { command: 'topic', description: 'Current session binding' },
+      { command: 'status', description: 'Session status' },
+      { command: 'stop', description: 'Stop current run' },
+      { command: 'help', description: 'Help' },
+    ] });
+    await this.call('setChatMenuButton', { menu_button: { type: 'commands' } });
+  }
   async topic(chat, name) {
     const result = await this.call('createForumTopic', { chat_id: chat, name });
     return result.message_thread_id;

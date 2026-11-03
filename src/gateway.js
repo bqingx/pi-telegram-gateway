@@ -1,4 +1,9 @@
-const HELP = `/topic — show current binding (root: list sessions)
+import { SessionControls } from './controls.js';
+
+const HELP = `/menu — settings buttons for this session
+/model, /models — choose provider and model
+/thinking, /reasoning — choose reasoning effort
+/topic — show current binding (root: list sessions)
 /topic <session-id> — restore an unbound session in this topic
 /sessions [page] — list your sessions
 /new — fresh session in this topic, keep old history
@@ -12,6 +17,7 @@ export class Gateway {
     Object.assign(this, { state, telegram, backend, maxActive });
     this.allowed = new Set(allowedUsers);
     this.active = new Map();
+    this.controls = new SessionControls(this);
     this.closing = false;
   }
   async create(chat, thread, user, title) {
@@ -22,6 +28,7 @@ export class Gateway {
     return record;
   }
   async handle(update) {
+    if (update.callback_query) return this.controls.callback(update.callback_query);
     const m = update.message;
     if (this.closing || !m || m.chat?.type !== 'private' || m.from?.is_bot || !this.allowed.has(m.from?.id)) return;
     const chat = m.chat.id, user = m.from.id;
@@ -42,7 +49,17 @@ export class Gateway {
     let record = thread ? this.state.current(chat, thread) : undefined;
     if (match) {
       const command = match[1].toLowerCase(), arg = (match[2] || '').trim();
-      if (command === 'help' || command === 'start') return say(HELP);
+      if (command === 'help' || command === 'start') {
+        await say(HELP);
+        if (record && !this.active.has(record.id)) return this.controls.show(record, chat, thread, user);
+        return;
+      }
+      if (['menu', 'model', 'models', 'thinking', 'reasoning'].includes(command)) {
+        if (!record || record.user !== user) return say('请进入话题，并先发送消息或点选 /new。Open a topic and send a message or use /new first.');
+        if (this.active.has(record.id)) return say('Session is busy. Wait for it to finish or use /stop.');
+        const kind = ['model', 'models'].includes(command) ? 'providers' : ['thinking', 'reasoning'].includes(command) ? 'thinking' : 'home';
+        return this.controls.show(record, chat, thread, user, { kind });
+      }
       if (command === 'sessions' || (command === 'topic' && !thread)) {
         const all = Object.values(this.state.data.sessions).filter(s => s.user === user && s.chat === chat);
         const page = Math.max(1, Number.parseInt(arg, 10) || 1);
@@ -62,11 +79,13 @@ export class Gateway {
       if (!['new', 'topic'].includes(command)) return say('Unknown command. Use /help.');
       if (record && this.active.has(record.id)) return say('Session is busy. Use /stop and wait before switching.');
       if (command === 'new') {
+        this.controls.invalidate(chat, thread);
         record = await this.create(chat, thread, user, 'New conversation');
         return say(`New session: ${record.id}`);
       }
       try { this.state.bind(chat, thread, arg, user); }
       catch { return say('Cannot switch: session missing, belongs elsewhere, or is bound to another topic.'); }
+      this.controls.invalidate(chat, thread);
       record = this.state.current(chat, thread);
       await say(`Restored: ${record.title}\n${record.id}`);
       const agent = await this.backend.open(record);
@@ -81,6 +100,7 @@ export class Gateway {
       thread = await this.telegram.topic(chat, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || 'Pi Chat');
     }
     if (!record) record = await this.create(chat, thread, user, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || 'Pi Chat');
+    this.controls.invalidate(chat, thread);
     const job = { agent: null, cancelled: false, promise: null };
     this.active.set(record.id, job);
     this.state.data.jobs[record.id] = { chat, thread, status: 'running', updateId: update.update_id };
