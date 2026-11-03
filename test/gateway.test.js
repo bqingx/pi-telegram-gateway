@@ -21,13 +21,19 @@ function setup(t, { slow = false, maxActive = 4 } = {}) {
       last: () => `last:${record.id}`, abort: async () => release?.(), dispose() {},
     }),
   };
+  const typing = [];
+  telegram.startTyping = (chat, thread) => {
+    const pulse = { chat, thread, stopped: false };
+    typing.push(pulse);
+    return () => { pulse.stopped = true; };
+  };
   const gateway = new Gateway({ state, telegram, backend, allowedUsers: [42], maxActive });
   let id = 0;
   const message = (text, thread, extra = {}) => ({ update_id: ++id, message: {
     chat: { id: 42, type: 'private' }, from: { id: 42 }, text, message_thread_id: thread, ...extra,
   } });
   const idle = async () => { await Promise.all([...gateway.active.values()].map(j => j.promise)); };
-  return { state, sent, prompts, gateway, message, idle, telegram, dir };
+  return { state, sent, prompts, gateway, message, idle, telegram, dir, typing };
 }
 
 test('root prompt creates a topic/session and replies in that topic', async t => {
@@ -35,6 +41,8 @@ test('root prompt creates a topic/session and replies in that topic', async t =>
   assert.equal(x.state.current(42, 11).id, 's1');
   assert.deepEqual(x.prompts, [['s1', 'hello']]);
   assert.deepEqual(x.sent.at(-1), [42, 11, 'reply:s1']);
+  assert.deepEqual(x.typing.map(p => p.thread), [undefined, 11]);
+  assert.ok(x.typing.every(p => p.stopped));
 });
 test('each root prompt starts a separate session; topic continues original', async t => {
   const x = setup(t);
@@ -56,6 +64,7 @@ test('unauthorized, groups, bots and edits are ignored', async t => {
   await x.gateway.handle(x.message('x', undefined, { from: { id: 42, is_bot: true } }));
   await x.gateway.handle({ edited_message: x.message('x').message });
   assert.equal(x.sent.length, 0); assert.equal(x.prompts.length, 0);
+  assert.equal(x.typing.length, 0);
 });
 test('/new preserves old session; /topic restores it and replays last text', async t => {
   const x = setup(t); await x.gateway.handle(x.message('hello')); await x.idle();
@@ -83,8 +92,10 @@ test('busy session rejects switching and duplicate prompts; stop stays responsiv
   await x.gateway.handle(x.message('slow')); await new Promise(r => setImmediate(r));
   await x.gateway.handle(x.message('/new', 11)); assert.match(x.sent.at(-1)[2], /busy/);
   await x.gateway.handle(x.message('again', 11)); assert.match(x.sent.at(-1)[2], /not queued/);
+  assert.equal(x.typing.at(-1).stopped, false);
   await x.gateway.handle(x.message('/stop', 11)); await x.idle();
   assert.equal(x.prompts.length, 1);
+  assert.ok(x.typing.every(p => p.stopped));
 });
 test('concurrency cap prevents creating another topic', async t => {
   const x = setup(t, { slow: true, maxActive: 1 });
@@ -93,11 +104,13 @@ test('concurrency cap prevents creating another topic', async t => {
   assert.equal(Object.keys(x.state.data.sessions).length, 1);
   assert.match(x.sent.at(-1)[2], /concurrency/);
   await x.gateway.close();
+  assert.ok(x.typing.every(p => p.stopped));
 });
 test('topic creation failure never falls back to another topic', async t => {
   const x = setup(t); x.telegram.topic = async () => { throw new Error('no topics'); };
   await assert.rejects(x.gateway.handle(x.message('hello')));
   assert.equal(x.prompts.length, 0);
+  assert.ok(x.typing.every(p => p.stopped));
 });
 test('bindings and offset survive restart with private permissions', async t => {
   const x = setup(t); await x.gateway.handle(x.message('hello')); await x.idle();
@@ -136,4 +149,5 @@ test('delivery failure is recorded without re-prompting', async t => {
   await x.gateway.handle(x.message('hello')); await x.idle();
   assert.equal(x.state.data.jobs.s1.status, 'delivery-uncertain');
   assert.equal(x.prompts.length, 1);
+  assert.ok(x.typing.every(p => p.stopped));
 });

@@ -8,7 +8,7 @@ A standalone Telegram gateway for [pi](https://github.com/earendil-works/pi). In
 
 ## Status
 
-Early **0.2.0** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
+Early **0.2.1** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
 
 ## Install
 
@@ -77,6 +77,8 @@ A session already bound to another topic cannot be restored here. Use `/new` the
 
 Independent topics can run concurrently, but they share the workspace and OS account: this is conversation isolation, **not filesystem/process isolation**. A busy topic rejects additional prompts (no silent queue) and refuses `/new` or session switching until idle. Polling stays responsive while the model works. Commands are handled by the gateway; arbitrary pi UI slash commands are not forwarded.
 
+Accepted text prompts immediately start a Telegram **typing** indicator, refreshed every four seconds while pi initializes, reasons or runs tools. Root-DM typing moves to the new topic after creation. Completion, failure, `/stop` and shutdown cancel the refresh and any in-flight status request; Telegram clears it on reply or after its approximately five-second expiry (there is no explicit stop-typing API). Status requests never block or retry the model run, use short timeouts, and back off per chat on failure/`retry_after`. If Telegram rejects topic-scoped typing with API 400, it falls back to the DM view, like Hermes. Typing is best-effort activity feedback, not a permanent online indicator.
+
 Topic names use the first prompt's first 80 characters, not a separate title-generation model call. Initial output is final assistant text, split into Telegram-safe plain-text chunks; reasoning, tool calls, tool output and raw exceptions are not forwarded.
 
 ## Persistence and failure semantics
@@ -112,4 +114,4 @@ See [systemd example](examples/pi-telegram-gateway.service). Configure its dedic
 
 ### Not yet supported
 
-Images/audio/files, streaming edits, typing indicators, inline session pickers, automatic CLI session import, full Hermes commands, tool approval buttons, remote pi UI dialogs, durable outbound delivery queues, and LLM-generated topic titles. First verify live Telegram and model behavior before relying on this for unattended work.
+Images/audio/files, streaming edits, inline session pickers, automatic CLI session import, full Hermes commands, tool approval buttons, remote pi UI dialogs, durable outbound delivery queues, and LLM-generated topic titles. First verify live Telegram and model behavior before relying on this for unattended work.

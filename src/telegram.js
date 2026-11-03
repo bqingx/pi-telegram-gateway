@@ -10,7 +10,7 @@ export function splitText(text, limit = 3500) {
 }
 
 export class Telegram {
-  constructor(token) { this.token = token; }
+  constructor(token) { this.token = token; this.typingCooldown = new Map(); }
   async call(method, params = {}, signal) {
     // Never surface fetch errors: their messages can contain the token URL.
     let response;
@@ -22,13 +22,64 @@ export class Telegram {
     } catch { throw new Error(`Telegram ${method}: transport failure`); }
     let data;
     try { data = await response.json(); } catch { throw new Error(`Telegram ${method}: invalid response`); }
-    if (!data.ok) throw new Error(`Telegram ${method}: API error ${data.error_code ?? response.status}`);
+    if (!data.ok) {
+      const error = new Error(`Telegram ${method}: API error ${data.error_code ?? response.status}`);
+      error.code = data.error_code ?? response.status;
+      const retryAfter = Number(data.parameters?.retry_after);
+      if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfter = retryAfter;
+      throw error;
+    }
     return data.result;
   }
   async send(chat, thread, text) {
     for (const part of splitText(text || '(No text response)')) {
       await this.call('sendMessage', { chat_id: chat, ...(thread ? { message_thread_id: thread } : {}), text: part });
     }
+  }
+  startTyping(chat, thread, { intervalMs = 4000, timeoutMs = 3000, cooldownMs = 30000 } = {}) {
+    let stopped = false, timer, controller;
+    const tick = async () => {
+      if (stopped) return;
+      const started = Date.now();
+      const remaining = (this.typingCooldown.get(chat) || 0) - started;
+      if (remaining > 0) {
+        timer = setTimeout(tick, remaining);
+        timer.unref?.();
+        return;
+      }
+      this.typingCooldown.delete(chat);
+      controller = new AbortController();
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
+      try {
+        const params = { chat_id: chat, action: 'typing', ...(thread ? { message_thread_id: thread } : {}) };
+        try { await this.call('sendChatAction', params, signal); }
+        catch (error) {
+          // Like Hermes, fall back to the DM view only on a thread API rejection,
+          // never on a timeout/429. Typing is metadata, not conversation content.
+          if (!thread || error.code !== 400 || signal.aborted) throw error;
+          await this.call('sendChatAction', { chat_id: chat, action: 'typing' }, signal);
+        }
+      } catch (error) {
+        if (!stopped) {
+          const delay = error.retryAfter ? Math.min(300000, Math.max(1000, error.retryAfter * 1000)) : cooldownMs;
+          this.typingCooldown.set(chat, Date.now() + delay);
+          // Bounded even if the bot serves many independent allowlisted chats.
+          if (this.typingCooldown.size > 128) this.typingCooldown.delete(this.typingCooldown.keys().next().value);
+        }
+      } finally {
+        if (!stopped) {
+          const delay = Math.max(0, intervalMs - (Date.now() - started), (this.typingCooldown.get(chat) || 0) - Date.now());
+          timer = setTimeout(tick, delay);
+          timer.unref?.();
+        }
+      }
+    };
+    void tick(); // Immediate and non-blocking; at most one request per lane.
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      controller?.abort();
+    };
   }
   async panel(chat, thread, text, keyboard) {
     return this.call('sendMessage', { chat_id: chat, ...(thread ? { message_thread_id: thread } : {}),

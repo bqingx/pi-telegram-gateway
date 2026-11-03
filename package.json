@@ -1,6 +1,6 @@
 {
   "name": "pi-telegram-gateway",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Persistent Telegram private topics mapped to pi agent sessions",
   "type": "module",
   "bin": { "pi-telegram-gateway": "bin/cli.js" },

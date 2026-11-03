@@ -70,7 +70,7 @@ export class Gateway {
       if (!thread) return say('Open a topic first, or send a normal message here to create one.');
       if (command === 'stop') {
         const job = record && this.active.get(record.id);
-        if (job) { job.cancelled = true; await job.agent?.abort(); }
+        if (job) { job.cancelled = true; job.stopTyping?.(); await job.agent?.abort(); }
         return say(job ? 'Stop requested. Already executed tool effects cannot be undone.' : 'No active run.');
       }
       if (command === 'status' || (command === 'topic' && !arg)) {
@@ -95,17 +95,23 @@ export class Gateway {
     }
     if (record && this.active.has(record.id)) return say('This session is busy. Wait for its reply or use /stop; this message was not queued.');
     if (this.active.size >= this.maxActive) return say('Gateway concurrency limit reached; try again later.');
-    if (!thread) {
-      // Fail closed: never silently put a root message in a different session.
-      thread = await this.telegram.topic(chat, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || 'Pi Chat');
-    }
-    if (!record) record = await this.create(chat, thread, user, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || 'Pi Chat');
-    this.controls.invalidate(chat, thread);
-    const job = { agent: null, cancelled: false, promise: null };
-    this.active.set(record.id, job);
-    this.state.data.jobs[record.id] = { chat, thread, status: 'running', updateId: update.update_id };
-    this.state.save();
-    job.promise = this.run(record, m.text, chat, thread, job);
+    let stopTyping = this.telegram.startTyping?.(chat, thread);
+    try {
+      if (!thread) {
+        // Fail closed: never silently put a root message in a different session.
+        thread = await this.telegram.topic(chat, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || 'Pi Chat');
+        stopTyping?.();
+        stopTyping = this.telegram.startTyping?.(chat, thread);
+      }
+      if (!record) record = await this.create(chat, thread, user, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || 'Pi Chat');
+      this.controls.invalidate(chat, thread);
+      const job = { agent: null, cancelled: false, promise: null, stopTyping };
+      this.active.set(record.id, job);
+      this.state.data.jobs[record.id] = { chat, thread, status: 'running', updateId: update.update_id };
+      this.state.save();
+      job.promise = this.run(record, m.text, chat, thread, job);
+      stopTyping = undefined; // Lifecycle ownership transferred to the run.
+    } finally { stopTyping?.(); }
   }
   async run(record, text, chat, thread, job) {
     let phase = 'model';
@@ -113,17 +119,20 @@ export class Gateway {
       job.agent = await this.backend.open(record);
       if (job.cancelled) return;
       const reply = await job.agent.prompt(text);
+      job.stopTyping?.();
       phase = 'delivery';
       this.state.data.jobs[record.id].status = 'reply-pending';
       this.state.save();
       await this.telegram.send(chat, thread, reply);
       this.state.data.jobs[record.id].status = job.cancelled ? 'stopped' : 'done';
     } catch {
+      job.stopTyping?.();
       this.state.data.jobs[record.id].status = phase === 'delivery' ? 'delivery-uncertain' : 'failed';
       await this.telegram.send(chat, thread, phase === 'delivery'
         ? 'Reply delivery failed or is uncertain. Use /topic <same-session-id> when idle to replay the last reply. Do not repeat side-effecting instructions blindly.'
         : 'Run failed. History is preserved; check /status. Tool effects may already have occurred; nothing was automatically retried.').catch(() => {});
     } finally {
+      job.stopTyping?.();
       if (job.cancelled) this.state.data.jobs[record.id].status = 'stopped';
       job.agent?.dispose();
       this.active.delete(record.id);
@@ -142,7 +151,7 @@ export class Gateway {
   async close() {
     this.closing = true;
     const jobs = [...this.active.values()];
-    for (const job of jobs) job.cancelled = true;
+    for (const job of jobs) { job.cancelled = true; job.stopTyping?.(); }
     await Promise.allSettled(jobs.map(job => job.agent?.abort()));
     await Promise.allSettled(jobs.map(job => job.promise));
   }
