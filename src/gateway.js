@@ -149,7 +149,11 @@ export class Gateway {
     try {
       // A root message gets its topic only after the title is known: Telegram
       // clients ignore editForumTopic renames in private topics (Bot API #915).
-      if (!record) record = await this.create(chat, user, fallbackTitle(m.text, this.language(user)));
+      if (!record) {
+        record = await this.create(chat, user, fallbackTitle(m.text, this.language(user)));
+        // A message inside an unbound topic binds its new session to that topic.
+        if (thread) this.state.bind(chat, thread, record.id, user);
+      }
       if (thread) this.controls.invalidate(chat, thread);
       const job = { agent: null, cancelled: false, promise: null, stopTyping };
       this.active.set(record.id, job);
@@ -210,7 +214,7 @@ export class Gateway {
     } catch (error) {
       job.stopTyping?.();
       this.state.data.jobs[record.id].status = phase === 'delivery' ? 'delivery-uncertain' : 'failed';
-      await this.telegram.send(chat, thread, this.t(record.user, error.code === 'SESSION_BUSY' ? 'occupiedPrompt' : error.code === 'SESSION_UNMANAGED' ? 'unmanagedPrompt' : phase === 'delivery' ? 'deliveryFailed' : 'runFailed')).catch(() => {});
+      await this.telegram.send(chat, thread, this.failureText(record, error, phase)).catch(() => {});
     } finally {
       job.stopTyping?.();
       job.finalizing = true;
@@ -233,8 +237,17 @@ export class Gateway {
     } catch (error) {
       job.stopTyping?.();
       this.state.data.jobs[record.id].status = phase === 'delivery' ? 'delivery-uncertain' : 'failed';
-      await this.telegram.send(chat, thread, this.t(record.user, error.code === 'SESSION_BUSY' ? 'occupiedPrompt' : error.code === 'SESSION_UNMANAGED' ? 'unmanagedPrompt' : phase === 'delivery' ? 'deliveryFailed' : 'runFailed')).catch(() => {});
+      await this.telegram.send(chat, thread, this.failureText(record, error, phase)).catch(() => {});
     }
+  }
+  failureText(record, error, phase) {
+    const reason = typeof error.safeReason === 'string'
+      ? error.safeReason.replace(/https?:\/\/\S+/g, '…').replace(/\b(?:sk-|gh[pousr]_)[A-Za-z0-9_-]{12,}\b/g, '…')
+        .replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim().slice(0, 200) : '';
+    const key = error.code === 'SESSION_BUSY' ? 'occupiedPrompt' : error.code === 'SESSION_UNMANAGED' ? 'unmanagedPrompt'
+      : phase === 'delivery' ? 'deliveryFailed' : 'runFailed';
+    const text = this.t(record.user, key);
+    return key === 'runFailed' && reason ? `${text}\n${this.t(record.user, 'runFailedReason', { reason })}` : text;
   }
   async recover() {
     for (const [id, job] of Object.entries(this.state.data.jobs)) {

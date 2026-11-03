@@ -158,3 +158,26 @@ test('delivery failure is recorded without re-prompting', async t => {
   assert.equal(x.prompts.length, 1);
   assert.ok(x.typing.every(p => p.stopped));
 });
+test('a message in an unbound topic binds the session it creates', async t => {
+  const x = setup(t);
+  await x.gateway.handle(x.message('hello', 77)); await x.idle();
+  const record = x.state.current(42, 77);
+  assert.ok(record); assert.equal(record.id, 's1');
+  await x.gateway.handle(x.message('again', 77)); await x.idle();
+  assert.deepEqual(x.prompts.map(p => p[0]), ['s1', 's1']);
+});
+test('model failures report a bounded sanitized reason without leaking URLs or keys', async t => {
+  const x = setup(t);
+  x.gateway.backend.open = async () => ({
+    prompt: async () => { const e = new Error('Model run failed'); e.safeReason = 'Codex error: usage limit reached'; throw e; },
+    setTitle() {}, dispose() {},
+  });
+  await x.gateway.handle(x.message('hello')); await x.idle();
+  assert.match(x.sent.at(-1)[2], /failed/i); assert.match(x.sent.at(-1)[2], /usage limit reached/);
+  x.gateway.backend.open = async () => ({
+    prompt: async () => { const e = new Error('Model run failed'); e.safeReason = 'bad https://x.test/sk-secret-abcdefghijklmnop'; throw e; },
+    setTitle() {}, dispose() {},
+  });
+  await x.gateway.handle(x.message('hello', 11)); await x.idle();
+  assert.doesNotMatch(x.sent.at(-1)[2], /https:|sk-secret/);
+});

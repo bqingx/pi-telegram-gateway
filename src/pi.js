@@ -94,7 +94,15 @@ export class PiBackend {
         });
         try {
           await session.prompt(text, { expandPromptTemplates: false });
-          if (finalMessage?.stopReason === 'error') throw new Error('Model run failed');
+          if (finalMessage?.stopReason === 'error') {
+            const error = new Error('Model run failed');
+            // Bounded, sanitized provider reason for the owner; never raw URLs/keys.
+            error.safeReason = String(finalMessage.errorMessage || '')
+              .replace(/https?:\/\/\S+/g, '…')
+              .replace(/\b(?:sk-|gh[pousr]_)[A-Za-z0-9_-]{12,}\b/g, '…')
+              .replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim().slice(0, 200);
+            throw error;
+          }
           return finalMessage?.content?.filter(block => block.type === 'text').map(block => block.text).join('\n') || '';
         } finally { unsubscribe(); }
       },
