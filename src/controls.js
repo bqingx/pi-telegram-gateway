@@ -17,7 +17,15 @@ export class SessionControls {
     while (this.menus.size >= 128) this.menus.delete(this.menus.keys().next().value);
   }
   async show(record, chat, thread, user, view = { kind: 'home' }) {
-    const agent = await this.gateway.backend.open(record);
+    let agent;
+    try { agent = await this.gateway.backend.open(record); }
+    catch (error) {
+      if (!['SESSION_BUSY', 'SESSION_UNMANAGED'].includes(error.code)) throw error;
+      await this.gateway.telegram.send(chat, thread, error.code === 'SESSION_BUSY' ?
+        'Session is occupied locally or by another operation. Close the other endpoint first.' :
+        'Enroll this local session with pi-shared --enroll <session-id> after closing ordinary pi windows.');
+      return;
+    }
     try {
       const config = agent.config();
       const models = ['providers', 'models'].includes(view.kind) ? await agent.models() : [];
@@ -96,7 +104,7 @@ export class SessionControls {
     if (!menu || Date.now() > menu.expires || menu.user !== query.from.id || menu.chat !== m.chat.id ||
         menu.messageId !== m.message_id || (thread !== undefined && thread !== menu.thread)) return answer('菜单已失效，请重新打开 /menu。');
     const record = g.state.current(menu.chat, menu.thread);
-    if (!record || record.id !== menu.recordId || record.user !== query.from.id) return answer('Session changed. Reopen /menu.');
+    if (!g.canUse(record, query.from.id, menu.chat) || record.id !== menu.recordId) return answer('Session changed. Reopen /menu.');
     const action = menu.actions[Number(match[2])];
     if (!action) return answer('Invalid selection.');
     if (g.active.has(record.id)) return answer('Session busy. Wait or /stop.');
@@ -125,9 +133,10 @@ export class SessionControls {
         else throw new Error('Unknown action');
         await g.telegram.editPanel(menu.chat, menu.messageId, `已保存，仅当前会话 / Saved for this session only.\n${summary(agent.config())}`);
       }
-    } catch {
+    } catch (error) {
       this.invalidate(menu.chat, menu.thread);
       await g.telegram.editPanel(menu.chat, menu.messageId,
+        error.code === 'SESSION_BUSY' ? 'Session is occupied locally. Close that window and reopen /menu.' :
         '操作失败或确认消息未送达；请重新打开 /menu 查看实际设置。未自动重试。\nSelection failed or confirmation delivery was uncertain. Reopen /menu to inspect; no automatic retry.').catch(() => {});
     } finally { agent?.dispose(); }
   }

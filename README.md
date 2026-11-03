@@ -8,7 +8,7 @@ A standalone Telegram gateway for [pi](https://github.com/earendil-works/pi). In
 
 ## Status
 
-Early **0.2.1** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
+Early **0.3.0** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
 
 ## Install
 
@@ -32,7 +32,8 @@ Edit `~/.config/pi-telegram-gateway/config.json`:
   "allowedUsers": [123456789],
   "cwd": "/home/alice/workspace",
   "dataDir": "/home/alice/.local/share/pi-telegram-gateway",
-  "maxActive": 4
+  "maxActive": 4,
+  "sharedSessionOwner": null
 }
 ```
 
@@ -73,7 +74,7 @@ Changes are persisted **only to the current session**, not global pi defaults or
 
 Pickers are bound to their requesting user, chat, topic, message and session. They expire after ten minutes, after a new prompt/session switch, or on restart; older pages cannot apply a stale selection. Open a fresh menu if settings changed elsewhere. Running sessions reject settings changes. `callback_query` updates are authenticated independently, and confirmation/error messages never include raw SDK exceptions. Do not run another service that overwrites this bot's command menu.
 
-A session already bound to another topic cannot be restored here. Use `/new` there first to release its old binding. Sessions are scoped to this gateway's bot, chat and user; arbitrary local session paths cannot be opened remotely. Existing CLI sessions are **not** imported automatically.
+A session already bound to another topic cannot be restored here. Use `/new` there first to release its old binding. Sessions are scoped to this gateway's bot, chat and user; arbitrary local session paths cannot be opened remotely. By default CLI sessions stay separate. Enable the explicit single-owner shared mode below to discover and use native session files.
 
 Independent topics can run concurrently, but they share the workspace and OS account: this is conversation isolation, **not filesystem/process isolation**. A busy topic rejects additional prompts (no silent queue) and refuses `/new` or session switching until idle. Polling stays responsive while the model works. Commands are handled by the gateway; arbitrary pi UI slash commands are not forwarded.
 
@@ -81,9 +82,36 @@ Accepted text prompts immediately start a Telegram **typing** indicator, refresh
 
 Topic names use the first prompt's first 80 characters, not a separate title-generation model call. Initial output is final assistant text, split into Telegram-safe plain-text chunks; reasoning, tool calls, tool output and raw exceptions are not forwarded.
 
+## Shared Telegram / local sessions (opt-in)
+
+Set `sharedSessionOwner` in the config to **one allowlisted numeric Telegram user ID**, then restart the gateway. Native pi session metadata from the current profile becomes visible in that user's `/sessions` list, with occupation/enrollment labels; it is not exposed to other allowlisted Telegram users. This is an explicit grant of access to that OS user's local conversation history. No transcript is copied: the gateway uses the **same original JSONL and original workspace**, and reloads it on every operation. New Telegram sessions are written to native pi's session directory. Earlier gateway sessions stay at their original paths and are also discoverable by `pi-shared`.
+
+Use the installed `pi-shared` entry point on the local side:
+
+```sh
+pi-shared --list
+# For an existing ordinary pi session, CLOSE ALL ordinary pi windows using it,
+# then explicitly enroll and open it with the guarded launcher:
+pi-shared --enroll <session-id>
+# Subsequently:
+pi-shared --session <session-id>
+pi-shared --new
+pi-shared                        # interactive session chooser
+```
+
+A previously unguarded local session is listed as **unmanaged** and **cannot be opened by Telegram** until you deliberately enroll it. This prevents the gateway silently taking over one of your already-open ordinary pi windows. Gateway-created sessions in shared mode are enrolled automatically. Enrolling is your acknowledgement that no unguarded writer is still using that file; the launcher cannot discover arbitrary existing pi writers reliably.
+
+**Exclusive use, not live mirroring:** `pi-shared` acquires a sidecar directory lock **before starting pi**, holds it while the entire local window is open (even idle), and releases it only when the child exits. `/shared-release` exits that local window after pi settles. Local in-process `/resume`, `/new`, `/fork` and `/clone` are cancelled by the injected guard; exit and run `pi-shared` again to switch/create sessions. Reloading the same session is allowed. Use a pi CLI compatible with the pinned SDK (currently 1.5.0).
+
+Telegram acquires the same canonical-path lock **before the SDK opens or migrates a session** and holds it until that operation's SDK is disposed. While pi is generating, executing tools, restoring, or editing settings, local open fails. Once a Telegram operation is idle, the local launcher may acquire the session even while its topic remains bound. While the local window is open, new Telegram prompts/settings/restores refuse with an occupied message; they are not queued, replayed or forced. On local exit the next Telegram operation reloads the latest history/model/thinking from disk. Different sessions remain usable concurrently.
+
+**This is a cooperative lock, not an OS sandbox.** Opening the file using ordinary `pi`, disabling/bypassing the guard, manually deleting a live lock, using hard-link aliases, or editing JSONL directly can bypass it. There is no honest guarantee against an unmodified external writer that ignores locks; every shared local session must use `pi-shared`. Current ordinary pi windows do not gain protection automatically. No forced takeover or automatic stale-lock eviction is implemented.
+
+Sidecars are `<session.jsonl>.pi-shared.json` (enrollment) and `<session.jsonl>.pi-shared-lock/owner.json` (channel, PID, host, private nonce). After a crash, check the recorded host, parent **and child** processes, and all possible session users before manually removing a stale lock. Locks with missing/ambiguous owner records also fail closed. Never delete a live lock or use enrollment to override one.
+
 ## Persistence and failure semantics
 
-- `dataDir/state.json` stores bot ID, allowlisted-user ownership, topic bindings, session index, polling offset and last job status. Real pi JSONL histories live in `dataDir/sessions/`. Back up **both** together.
+- `dataDir/state.json` stores bot ID, allowlisted-user ownership, topic bindings, session index, polling offset and last job status. Legacy/private pi JSONL histories live in `dataDir/sessions/`; shared mode also references original files in pi's native session directories. Back up the state, all referenced session files and enrollment sidecars together.
 - State snapshots use atomic rename + fsync, files are mode 600, state directories mode 700. Session files may contain sensitive tool output.
 - An update offset is persisted **before** effects. This intentionally favors **at-most-once admission**, not exactly-once execution. A crash can lose admitted work, orphan a topic or leave a partial operation; it will not blindly replay a possibly side-effecting instruction.
 - Interrupted runs get a best-effort restart warning, never automatic tool replay. Delivery errors may leave partial replies; restore the same session to replay its latest assistant text without rerunning the instruction.
@@ -114,4 +142,4 @@ See [systemd example](examples/pi-telegram-gateway.service). Configure its dedic
 
 ### Not yet supported
 
-Images/audio/files, streaming edits, inline session pickers, automatic CLI session import, full Hermes commands, tool approval buttons, remote pi UI dialogs, durable outbound delivery queues, and LLM-generated topic titles. First verify live Telegram and model behavior before relying on this for unattended work.
+Images/audio/files, streaming edits, inline session pickers, unguarded ordinary-pi shared access, full Hermes commands, tool approval buttons, remote pi UI dialogs, durable outbound delivery queues, and LLM-generated topic titles. First verify live Telegram and model behavior before relying on this for unattended work.

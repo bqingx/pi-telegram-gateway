@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PiBackend } from '../src/pi.js';
+import { SessionLease } from '../src/session-lock.js';
 
 // Real SDK, isolated profile, dummy credentials and no model request. This
 // catches SDK persistence behavior that fake Telegram tests cannot exercise.
@@ -24,6 +25,7 @@ test('real SDK model/thinking selection survives empty-session reopen without ch
   let agent = await backend.open(record);
   try {
     assert.equal(agent.config().model.id, 'one');
+    await assert.rejects(backend.open(record), { code: 'SESSION_BUSY' });
     assert.ok((await agent.models()).some(m => m.id === 'two' && m.provider === 'gateway-test'));
     await agent.setModel('gateway-test', 'two');
     const levels = agent.config().levels;
@@ -42,6 +44,17 @@ test('real SDK model/thinking selection survives empty-session reopen without ch
     assert.equal(agent.config().thinking, 'off');
   } finally { agent.dispose(); }
   assert.equal(readFileSync(join(agentDir, 'settings.json'), 'utf8'), defaults);
+  const localLease = SessionLease.acquire(record.file, 'local');
+  try {
+    await assert.rejects(backend.open(record), { code: 'SESSION_BUSY' });
+    const { SessionManager } = await backend.sdk();
+    const manager = SessionManager.open(record.file);
+    manager.appendModelChange('gateway-test', 'two');
+    manager.appendThinkingLevelChange('high');
+  } finally { localLease.release(); }
+  agent = await backend.open(record);
+  try { assert.equal(agent.config().model.id, 'two'); assert.equal(agent.config().thinking, 'high'); }
+  finally { agent.dispose(); }
   const other = await backend.create('Independent session');
   agent = await backend.open(other);
   try { assert.equal(agent.config().model.id, 'one'); assert.equal(agent.config().thinking, 'off'); }

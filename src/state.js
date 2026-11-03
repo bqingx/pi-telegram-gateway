@@ -27,13 +27,17 @@ export class State {
   current(chat, thread) {
     return this.data.sessions[this.data.bindings[this.key(chat, thread)]];
   }
-  bind(chat, thread, id, user) {
+  assertBindable(chat, thread, id, user) {
     const target = this.data.sessions[id];
     if (!target || target.user !== user || target.chat !== chat) throw new Error('Session not available to this user/chat');
     const key = this.key(chat, thread);
     if (Object.entries(this.data.bindings).some(([k, v]) => v === id && k !== key)) {
       throw new Error('Session already bound to another topic');
     }
+    return key;
+  }
+  bind(chat, thread, id, user) {
+    const key = this.assertBindable(chat, thread, id, user);
     this.data.bindings[key] = id;
     this.save();
   }

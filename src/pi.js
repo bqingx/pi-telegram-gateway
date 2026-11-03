@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { SessionLease, isEnrolled, enrollSession, UnmanagedSessionError, sessionOccupant } from './session-lock.js';
 
 export class PiBackend {
   constructor(cwd, dataDir, options = {}) {
@@ -8,20 +9,47 @@ export class PiBackend {
     this.options = options;
   }
   async sdk() { return import('@earendil-works/pi-coding-agent'); }
-  async create(title) {
+  async create(title, cwd = this.cwd) {
     const { SessionManager } = await this.sdk();
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    const manager = SessionManager.create(this.cwd, this.dir);
+    const manager = SessionManager.create(cwd, this.options.sharedSessions ? undefined : this.dir);
     manager.appendSessionInfo(title);
     // Pi lazily writes until the first conversation. Materialize the SDK's own
     // header/entries so even an empty /new session survives a restart.
-    writeFileSync(manager.getSessionFile(), [manager.getHeader(), ...manager.getEntries()]
-      .map(entry => JSON.stringify(entry)).join('\n') + '\n', { flag: 'wx', mode: 0o600 });
-    return { id: manager.getSessionId(), file: manager.getSessionFile() };
+    const file = manager.getSessionFile();
+    const lease = SessionLease.acquire(file, 'telegram');
+    try {
+      writeFileSync(file, [manager.getHeader(), ...manager.getEntries()]
+        .map(entry => JSON.stringify(entry)).join('\n') + '\n', { flag: 'wx', mode: 0o600 });
+      enrollSession(file);
+    } finally { lease.release(); }
+    return { id: manager.getSessionId(), file, cwd };
+  }
+  async listShared() {
+    if (!this.options.sharedSessions) return [];
+    const { SessionManager } = await this.sdk();
+    const all = [...await SessionManager.listAll(), ...await SessionManager.listAll(this.dir)];
+    const seen = new Set();
+    return all.filter(s => !seen.has(s.path) && seen.add(s.path)).map(s => ({
+      id: s.id, file: s.path, cwd: s.cwd, title: (s.name || s.firstMessage || 'Untitled session').replace(/\s+/g, ' ').slice(0, 120),
+      createdAt: s.created.toISOString(), modifiedAt: s.modified.toISOString(), source: 'local',
+    }));
+  }
+  usage(record) {
+    if (this.options.sharedSessions && !isEnrolled(record.file)) return 'unmanaged';
+    return sessionOccupant(record.file)?.channel || 'available';
   }
   async open(record) {
+    if (this.options.sharedSessions && !isEnrolled(record.file)) throw new UnmanagedSessionError();
+    const lease = SessionLease.acquire(record.file, 'telegram');
+    try {
+      const agent = await this.openUnlocked(record);
+      return { ...agent, dispose: () => { try { agent.dispose(); } finally { lease.release(); } } };
+    } catch (error) { lease.release(); throw error; }
+  }
+  async openUnlocked(record) {
     const { createAgentSession, SessionManager, ModelRuntime } = await this.sdk();
-    const manager = SessionManager.open(record.file, this.dir);
+    const manager = SessionManager.open(record.file);
     if (manager.getSessionId() !== record.id) throw new Error('Session ID mismatch');
     const modelRuntime = this.options.modelRuntime ?? await ModelRuntime.create(this.options.agentDir ? {
       authPath: join(this.options.agentDir, 'auth.json'), modelsPath: join(this.options.agentDir, 'models.json'),
@@ -33,7 +61,7 @@ export class PiBackend {
     // Explicit options also restore settings in empty /new sessions (SDK defaults
     // otherwise restore selections only after conversation messages exist).
     if (selected && (!model || !await modelRuntime.checkAuth(model.provider))) throw new Error('Saved model unavailable');
-    const { session } = await createAgentSession({ ...this.options, cwd: this.cwd, sessionManager: manager,
+    const { session } = await createAgentSession({ ...this.options, cwd: manager.getCwd() || this.cwd, sessionManager: manager,
       modelRuntime, ...(model ? { model } : {}), ...(thinking ? { thinkingLevel: thinking } : {}) });
     try { await session.bindExtensions({ mode: 'rpc', onError: () => {} }); }
     catch (error) { session.dispose(); throw error; }

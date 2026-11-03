@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { isEnrolled, sessionOccupant } from '../src/session-lock.js';
+
+const exec = promisify(execFile);
+test('local launcher requires enrollment, holds lease before child startup and releases on child exit', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'pi-launcher-test-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const profile = join(dir, 'profile'), sessions = join(profile, 'sessions', '--fixture--');
+  mkdirSync(sessions, { recursive: true });
+  const id = '12345678-1234-4234-8234-123456789abc', file = join(sessions, `test_${id}.jsonl`);
+  const contents = JSON.stringify({ type: 'session', version: 3, id, cwd: dir, timestamp: '2026-01-01T00:00:00.000Z' }) + '\n';
+  writeFileSync(file, contents);
+  const fakePi = join(dir, 'fake-pi.js');
+  writeFileSync(fakePi, `#!${process.execPath}
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const args=process.argv.slice(2);
+assert.equal(args[0],'--session');assert.equal(args[1],process.env.PI_SHARED_SESSION_FILE);
+assert.equal(args[2],'-e');assert.ok(args[3].endsWith('local-guard.js'));
+const owner=JSON.parse(readFileSync(args[1]+'.pi-shared-lock/owner.json','utf8'));
+assert.equal(owner.token,process.env.PI_SHARED_SESSION_TOKEN);assert.equal(owner.channel,'local');
+console.log('CHILD_STARTED_WITH_LOCK');
+`, { mode: 0o700 });
+  const env = { ...process.env, PI_CODING_AGENT_DIR: profile, PI_SHARED_PI_BIN: fakePi, PI_TELEGRAM_CONFIG: join(dir, 'absent-config.json') };
+  const cli = fileURLToPath(new URL('../bin/local.js', import.meta.url));
+  await assert.rejects(exec(process.execPath, [cli, '--session', id], { env, cwd: dir }), error => error.stderr.includes('enroll'));
+  assert.equal(isEnrolled(file), false);
+  const first = await exec(process.execPath, [cli, '--enroll', id], { env, cwd: dir });
+  assert.match(first.stdout, /CHILD_STARTED_WITH_LOCK/);
+  assert.ok(isEnrolled(file)); assert.equal(sessionOccupant(file), null);
+  assert.equal(readFileSync(file, 'utf8'), contents);
+  const second = await exec(process.execPath, [cli, '--session', id], { env, cwd: dir });
+  assert.match(second.stdout, /CHILD_STARTED_WITH_LOCK/);
+  assert.equal(sessionOccupant(file), null);
+});

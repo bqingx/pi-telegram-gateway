@@ -14,7 +14,7 @@ if (process.argv[2] === 'init') {
   writeFileSync(configPath, JSON.stringify({
     tokenFile: join(homedir(), '.config/pi-telegram-gateway/bot-token'),
     allowedUsers: [], cwd: process.cwd(),
-    dataDir: join(homedir(), '.local/share/pi-telegram-gateway'), maxActive: 4,
+    dataDir: join(homedir(), '.local/share/pi-telegram-gateway'), maxActive: 4, sharedSessionOwner: null,
   }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
   console.log(`Created ${configPath}. Fill allowedUsers and write the token to tokenFile (mode 600).`);
 } else if (process.argv[2] && process.argv[2] !== 'start') {
@@ -36,6 +36,7 @@ async function main() {
   for (const key of ['cwd', 'dataDir', 'tokenFile']) {
     if (typeof config[key] !== 'string' || !config[key].startsWith('/')) throw new Error('Paths must be absolute');
   }
+  if (config.sharedSessionOwner != null && (!Number.isSafeInteger(config.sharedSessionOwner) || !config.allowedUsers.includes(config.sharedSessionOwner))) throw new Error('Shared session owner must be allowlisted');
   const token = readFileSync(config.tokenFile, 'utf8').trim();
   if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) throw new Error('Invalid token');
   mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
@@ -57,8 +58,8 @@ async function main() {
     state.save();
     const webhook = await telegram.call('getWebhookInfo');
     if (webhook.url) throw new Error('Webhook configured: remove it explicitly before polling');
-    gateway = new Gateway({ state, telegram, backend: new PiBackend(config.cwd, config.dataDir),
-      allowedUsers: config.allowedUsers, maxActive: config.maxActive ?? 4 });
+    gateway = new Gateway({ state, telegram, backend: new PiBackend(config.cwd, config.dataDir, { sharedSessions: config.sharedSessionOwner != null }),
+      allowedUsers: config.allowedUsers, maxActive: config.maxActive ?? 4, sharedSessionOwner: config.sharedSessionOwner });
     await telegram.registerCommands();
     await gateway.recover();
     console.log('Gateway ready (private topics; allowlist enforced).');
