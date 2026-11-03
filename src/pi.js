@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SessionLease, isEnrolled, enrollSession, UnmanagedSessionError, sessionOccupant } from './session-lock.js';
+import { generateTitle as requestTitle } from './titles.js';
 
 export class PiBackend {
   constructor(cwd, dataDir, options = {}) {
@@ -39,6 +40,16 @@ export class PiBackend {
     if (this.options.sharedSessions && !isEnrolled(record.file)) return 'unmanaged';
     return sessionOccupant(record.file)?.channel || 'available';
   }
+  async setSessionTitle(record, title) {
+    if (this.options.sharedSessions && !isEnrolled(record.file)) throw new UnmanagedSessionError();
+    const lease = SessionLease.acquire(record.file, 'telegram');
+    try {
+      const { SessionManager } = await this.sdk();
+      const manager = SessionManager.open(record.file);
+      if (manager.getSessionId() !== record.id) throw new Error('Session ID mismatch');
+      manager.appendSessionInfo(title);
+    } finally { lease.release(); }
+  }
   async open(record) {
     if (this.options.sharedSessions && !isEnrolled(record.file)) throw new UnmanagedSessionError();
     const lease = SessionLease.acquire(record.file, 'telegram');
@@ -65,7 +76,15 @@ export class PiBackend {
       modelRuntime, ...(model ? { model } : {}), ...(thinking ? { thinkingLevel: thinking } : {}) });
     try { await session.bindExtensions({ mode: 'rpc', onError: () => {} }); }
     catch (error) { session.dispose(); throw error; }
+    const titleController = new AbortController();
     return {
+      generateTitle: async (text, language) => {
+        const result = await requestTitle(session.modelRuntime, session.model, text, language, titleController.signal);
+        if (result.usage) manager.appendUsage('title', result.provider || session.model?.provider || 'unknown', result.model || session.model?.id || 'unknown', result.usage);
+        return result.title;
+      },
+      setTitle: title => { manager.appendSessionInfo(title); },
+      cancelTitle: () => titleController.abort(),
       prompt: async (text) => {
         // Gateway owns slash commands; do not invoke hidden UI-dependent commands remotely.
         let finalMessage;
@@ -96,8 +115,8 @@ export class PiBackend {
         session.setThinkingLevel(level, { persist: false });
       },
       last: () => session.getLastAssistantText(),
-      abort: () => session.abort(),
-      dispose: () => session.dispose(),
+      abort: () => { titleController.abort(); return session.abort(); },
+      dispose: () => { titleController.abort(); session.dispose(); },
     };
   }
 }

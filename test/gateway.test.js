@@ -15,12 +15,12 @@ function setup(t, { slow = false, maxActive = 4 } = {}) {
   state.setLanguage(42, 'en');
   let topic = 10, session = 0, release;
   const telegram = { send: async (...args) => { sent.push(args); }, topic: async () => ++topic,
-    panel: async (chat, thread, text) => { sent.push([chat, thread, text]); return { message_id: 1 }; } };
+    panel: async (chat, thread, text) => { sent.push([chat, thread, text]); return { message_id: 1 }; }, rename: async () => {} };
   const backend = {
     create: async () => ({ id: `s${++session}`, file: '/fake' }),
     open: async record => ({
       prompt: async text => { prompts.push([record.id, text]); if (slow) await new Promise(r => { release = r; }); return `reply:${record.id}`; },
-      last: () => `last:${record.id}`, abort: async () => release?.(), dispose() {},
+      last: () => `last:${record.id}`, setTitle() {}, abort: async () => release?.(), dispose() {},
     }),
   };
   const typing = [];

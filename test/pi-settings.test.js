@@ -44,6 +44,20 @@ test('real SDK model/thinking selection survives empty-session reopen without ch
     assert.equal(agent.config().thinking, 'off');
   } finally { agent.dispose(); }
   assert.equal(readFileSync(join(agentDir, 'settings.json'), 'utf8'), defaults);
+  const { ModelRuntime, SessionManager } = await backend.sdk();
+  const runtime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') });
+  runtime.completeSimple = async () => ({ content: [{ type: 'text', text: '自动生成会话标题' }], stopReason: 'stop', provider: 'gateway-test', model: 'one',
+    usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+  backend.options.modelRuntime = runtime;
+  agent = await backend.open(record);
+  try { const title = await agent.generateTitle('生成标题测试', 'zh'); agent.setTitle(title); }
+  finally { agent.dispose(); }
+  let named = SessionManager.open(record.file);
+  assert.equal(named.getSessionName(), '自动生成会话标题');
+  assert.equal(named.getBranch().filter(e => e.type === 'usage' && e.kind === 'title').length, 1);
+  assert.equal(named.getBranch().some(e => e.type === 'message' && e.message.role === 'user'), false);
+  await backend.setSessionTitle(record, '用户手动标题');
+  named = SessionManager.open(record.file); assert.equal(named.getSessionName(), '用户手动标题');
   const localLease = SessionLease.acquire(record.file, 'local');
   try {
     await assert.rejects(backend.open(record), { code: 'SESSION_BUSY' });

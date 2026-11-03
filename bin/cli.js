@@ -67,6 +67,7 @@ async function main() {
         .catch(() => console.error('Per-user command menu refresh failed; select /language to retry.'));
     }
     await gateway.recover();
+    gateway.start();
     console.log('Gateway ready (private topics; allowlist enforced).');
     let failures = 0;
     while (!stopping) {

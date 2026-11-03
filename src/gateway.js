@@ -1,6 +1,8 @@
 import { SessionControls } from './controls.js';
 import { LanguageControls } from './language.js';
 import { translate, usageLabel } from './i18n.js';
+import { fallbackTitle, cleanTitle } from './titles.js';
+import { TopicTitles } from './topic-titles.js';
 
 export class Gateway {
   constructor({ state, telegram, backend, allowedUsers, maxActive = 4, sharedSessionOwner }) {
@@ -9,8 +11,10 @@ export class Gateway {
     this.active = new Map();
     this.controls = new SessionControls(this);
     this.languages = new LanguageControls(this);
+    this.topicTitles = new TopicTitles(this);
     this.closing = false;
   }
+  start() { this.topicTitles.start(); }
   language(user) { return this.state.language(user); }
   t(user, key, params) { return translate(this.language(user), key, params); }
   usage(user, code) { return usageLabel(this.language(user), code); }
@@ -22,13 +26,15 @@ export class Gateway {
     for (const item of await this.backend.listShared()) {
       const existing = this.state.data.sessions[item.id];
       if (existing && (existing.user !== user || existing.chat !== chat || existing.file !== item.file)) continue;
-      this.state.data.sessions[item.id] = { ...item, ...existing, source: existing ? (existing.source || 'gateway') : 'local', title: item.title || this.t(user, 'untitled'), modifiedAt: item.modifiedAt, user, chat };
+      const metadata = { ...item, ...existing, source: existing ? (existing.source || 'gateway') : 'local', title: item.title || this.t(user, 'untitled'), modifiedAt: item.modifiedAt, user, chat };
+      if (existing) Object.assign(existing, metadata); // Preserve references held by active runs/title synchronization.
+      else this.state.data.sessions[item.id] = metadata;
     }
     this.state.save();
   }
   async create(chat, thread, user, title, cwd) {
     const info = await this.backend.create(title, cwd);
-    const record = { ...info, chat, user, title, source: 'gateway', createdAt: new Date().toISOString() };
+    const record = { ...info, chat, user, title, pendingTitle: true, source: 'gateway', createdAt: new Date().toISOString() };
     this.state.data.sessions[info.id] = record;
     this.state.bind(chat, thread, info.id, user);
     return record;
@@ -47,7 +53,11 @@ export class Gateway {
       this.state.save();
       return;
     }
-    if (m.forum_topic_created || m.forum_topic_edited || m.forum_topic_closed || m.forum_topic_reopened) return;
+    if (m.forum_topic_edited) {
+      if (thread && typeof m.forum_topic_edited.name === 'string') await this.topicTitles.changed(chat, thread, user, m.forum_topic_edited.name);
+      return;
+    }
+    if (m.forum_topic_created || m.forum_topic_closed || m.forum_topic_reopened) return;
     if (!m.text) {
       await say(t('textOnly'));
       return;
@@ -117,11 +127,11 @@ export class Gateway {
     try {
       if (!thread) {
         // Fail closed: never silently put a root message in a different session.
-        thread = await this.telegram.topic(chat, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || t('topicTitle'));
+        thread = await this.telegram.topic(chat, fallbackTitle(m.text, this.language(user)));
         stopTyping?.();
         stopTyping = this.telegram.startTyping?.(chat, thread);
       }
-      if (!record) record = await this.create(chat, thread, user, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || t('topicTitle'));
+      if (!record) record = await this.create(chat, thread, user, fallbackTitle(m.text, this.language(user)));
       this.controls.invalidate(chat, thread);
       const job = { agent: null, cancelled: false, promise: null, stopTyping };
       this.active.set(record.id, job);
@@ -134,8 +144,37 @@ export class Gateway {
   async run(record, text, chat, thread, job) {
     let phase = 'model';
     try {
+      await this.topicTitles.wait(record.id);
       job.agent = await this.backend.open(record);
+      await this.topicTitles.flush(record, job.agent);
       if (job.cancelled) return;
+      if (record.pendingTitle) {
+        const version = record.titleVersion || 0;
+        const suggested = await job.agent.generateTitle?.(text, this.language(record.user));
+        if (job.cancelled) return;
+        if (record.pendingTitle && (record.titleVersion || 0) === version) {
+          const title = cleanTitle(suggested || '') || fallbackTitle(text, this.language(record.user));
+          try {
+            // Keep the existing session lease throughout both name changes.
+            this.topicTitles.namingTargets.set(record.id, title);
+            await this.telegram.rename(chat, thread, title);
+            if ((record.titleVersion || 0) !== version) {
+              // A user rename arrived while Telegram's automatic rename was in flight.
+              const manual = record.pendingTopicTitle?.name || record.title;
+              this.topicTitles.namingTargets.set(record.id, manual);
+              await this.telegram.rename(chat, thread, manual);
+            } else {
+              job.agent.setTitle(title);
+              record.title = title;
+            }
+          } catch {
+            await this.telegram.send(chat, thread, this.t(record.user, 'titleSyncFailed')).catch(() => {});
+          } finally { this.topicTitles.namingTargets.delete(record.id); }
+          record.pendingTitle = false; // One attempt per session; no loop on generation/rename errors.
+          this.state.save();
+        }
+        await this.topicTitles.flush(record, job.agent);
+      }
       const reply = await job.agent.prompt(text);
       job.stopTyping?.();
       phase = 'delivery';
@@ -166,9 +205,11 @@ export class Gateway {
   }
   async close() {
     this.closing = true;
+    this.topicTitles.stop();
     const jobs = [...this.active.values()];
     for (const job of jobs) { job.cancelled = true; job.stopTyping?.(); }
     await Promise.allSettled(jobs.map(job => job.agent?.abort()));
     await Promise.allSettled(jobs.map(job => job.promise));
+    await this.topicTitles.settle();
   }
 }

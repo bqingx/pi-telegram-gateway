@@ -8,7 +8,7 @@ A standalone Telegram gateway for [pi](https://github.com/earendil-works/pi). In
 
 ## Status
 
-Early **0.4.0** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
+Early **0.5.0** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
 
 ## Install
 
@@ -89,7 +89,11 @@ Independent topics can run concurrently, but they share the workspace and OS acc
 
 Accepted text prompts immediately start a Telegram **typing** indicator, refreshed every four seconds while pi initializes, reasons or runs tools. Root-DM typing moves to the new topic after creation. Completion, failure, `/stop` and shutdown cancel the refresh and any in-flight status request; Telegram clears it on reply or after its approximately five-second expiry (there is no explicit stop-typing API). Status requests never block or retry the model run, use short timeouts, and back off per chat on failure/`retry_after`. If Telegram rejects topic-scoped typing with API 400, it falls back to the DM view, like Hermes. Typing is best-effort activity feedback, not a permanent online indicator.
 
-Topic names use the first prompt's first 80 characters, not a separate title-generation model call. Initial output is final assistant text, split into Telegram-safe plain-text chunks; reasoning, tool calls, tool output and raw exceptions are not forwarded.
+New topics start with a short local placeholder, then the first real prompt generates one concise title (at most 24 Unicode characters) using the session's selected model. The **same title** names the Telegram topic and native pi session (`session_info`). `/new` defers this until its first message. The separate, tool-free title request contains only a sanitized, bounded first message (at most 2000 characters), is limited to 128 output tokens / approximately six seconds, and records returned usage as a `title` usage entry. It costs an additional short model request and can consume subscription quota; it is not free by assumption. It does not enter conversation history or execute tools. Failure/empty output uses a local short-title fallback; Telegram/filesystem name-sync failures are reported without repeating the user's prompt. Existing sessions are not retroactively auto-titled.
+
+When an authorized user **edits a bound topic's name in Telegram**, the session name follows and the bot explicitly confirms it. This metadata-only operation makes no model request. A manual name is not truncated to the automatic 24-character limit. Manual renames take priority over a pending automatic title. Bot echoes, icon-only edits and unbound/unauthorized topic edits are ignored. If the native session is occupied, the pending name is persisted and a localized notice explains it is not yet synchronized; a two-second reconciler applies the latest pending name when the lock is released, then confirms success. Pending metadata can resume after gateway restart, without replaying any prompt or tools, and is discarded if that session is no longer bound to the original topic. A Telegram topic rename is one-way metadata sync; native-side renames do not automatically rename Telegram topics.
+
+Initial output is final assistant text, split into Telegram-safe plain-text chunks; reasoning, tool calls, tool output and raw exceptions are not forwarded.
 
 ## Shared Telegram / local sessions (opt-in)
 
@@ -151,4 +155,4 @@ See [systemd example](examples/pi-telegram-gateway.service). Configure its dedic
 
 ### Not yet supported
 
-Images/audio/files, streaming edits, inline session pickers, unguarded ordinary-pi shared access, full Hermes commands, tool approval buttons, remote pi UI dialogs, durable outbound delivery queues, and LLM-generated topic titles. First verify live Telegram and model behavior before relying on this for unattended work.
+Images/audio/files, streaming edits, inline session pickers, unguarded ordinary-pi shared access, full Hermes commands, tool approval buttons, remote pi UI dialogs, durable outbound delivery queues, and native-to-Telegram title synchronization. First verify live Telegram and model behavior before relying on this for unattended work.
