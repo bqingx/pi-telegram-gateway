@@ -61,6 +61,7 @@ export class SessionControls {
     };
     if (view.kind === 'home') {
       rows.push([button(t('model'), navigate({ kind: 'providers' })), button(t('thinking'), navigate({ kind: 'thinking' }))]);
+      rows.push([button(t('rename'), { type: 'rename' })]);
       rows.push([button(t('language'), { type: 'language' }), cancel()]);
     } else if (view.kind === 'providers') {
       text += `\n\n${t('chooseProvider')}`;
@@ -117,6 +118,11 @@ export class SessionControls {
       await answer();
       await g.telegram.editPanel(menu.chat, menu.messageId, t('settingsClosed'));
       return;
+    }
+    if (action.type === 'rename') {
+      this.invalidate(menu.chat, menu.thread);
+      await answer();
+      return g.renames.show(record, menu.chat, menu.thread, menu.user);
     }
     if (action.type === 'language') {
       this.invalidate(menu.chat, menu.thread);

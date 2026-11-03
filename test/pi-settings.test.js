@@ -56,7 +56,9 @@ test('real SDK model/thinking selection survives empty-session reopen without ch
   assert.equal(named.getSessionName(), '自动生成会话标题');
   assert.equal(named.getBranch().filter(e => e.type === 'usage' && e.kind === 'title').length, 1);
   assert.equal(named.getBranch().some(e => e.type === 'message' && e.message.role === 'user'), false);
-  await backend.setSessionTitle(record, '用户手动标题');
+  await backend.setSessionTitle(record, '用户手动标题', async () => {
+    assert.throws(() => SessionLease.acquire(record.file, 'local'), { code: 'SESSION_BUSY' });
+  });
   named = SessionManager.open(record.file); assert.equal(named.getSessionName(), '用户手动标题');
   const localLease = SessionLease.acquire(record.file, 'local');
   try {

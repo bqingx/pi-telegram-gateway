@@ -27,6 +27,7 @@ export class Telegram {
     if (!data.ok) {
       const error = new Error(`Telegram ${method}: API error ${data.error_code ?? response.status}`);
       error.code = data.error_code ?? response.status;
+      error.notModified = error.code === 400 && /TOPIC_NOT_MODIFIED/i.test(data.description || '');
       const retryAfter = Number(data.parameters?.retry_after);
       if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfter = retryAfter;
       throw error;
@@ -87,6 +88,10 @@ export class Telegram {
     return this.call('sendMessage', { chat_id: chat, ...(thread ? { message_thread_id: thread } : {}),
       text, reply_markup: { inline_keyboard: keyboard } });
   }
+  async requestReply(chat, thread, text, placeholder) {
+    return this.call('sendMessage', { chat_id: chat, ...(thread ? { message_thread_id: thread } : {}), text,
+      reply_markup: { force_reply: true, selective: true, input_field_placeholder: placeholder } });
+  }
   async editPanel(chat, message, text, keyboard = []) {
     return this.call('editMessageText', { chat_id: chat, message_id: message, text,
       reply_markup: { inline_keyboard: keyboard } });
@@ -95,7 +100,7 @@ export class Telegram {
     return this.call('answerCallbackQuery', { callback_query_id: query, text });
   }
   async registerCommands(language = 'zh', chat) {
-    const commands = ['menu', 'model', 'thinking', 'language', 'sessions', 'new', 'topic', 'status', 'stop', 'help']
+    const commands = ['menu', 'model', 'thinking', 'rename', 'language', 'sessions', 'new', 'topic', 'status', 'stop', 'help']
       .map(command => ({ command, description: translate(language, `cmd_${command}`) }));
     await this.call('setMyCommands', { commands, ...(chat ? { scope: { type: 'chat', chat_id: chat } } : {}) });
     await this.call('setChatMenuButton', { ...(chat ? { chat_id: chat } : {}), menu_button: { type: 'commands' } });
@@ -105,6 +110,7 @@ export class Telegram {
     return result.message_thread_id;
   }
   async rename(chat, thread, name) {
-    await this.call('editForumTopic', { chat_id: chat, message_thread_id: thread, name });
+    try { await this.call('editForumTopic', { chat_id: chat, message_thread_id: thread, name }); }
+    catch (error) { if (!error.notModified) throw error; }
   }
 }

@@ -9,5 +9,9 @@ export function updateMetadata(update, botId) {
     messageKeys: message ? Object.keys(message) : [], chatId: message?.chat?.id, chatType: message?.chat?.type,
     messageId: message?.message_id, threadId: message?.message_thread_id, fromId: message?.from?.id,
     fromBot: !!message?.from?.is_bot, fromSelf: Number.isSafeInteger(botId) && message?.from?.id === botId,
-    topicNameLength: typeof name === 'string' ? Array.from(name).length : undefined };
+    topicNameLength: typeof name === 'string' ? Array.from(name).length : undefined,
+    replyMessageKeys: message?.reply_to_message ? Object.keys(message.reply_to_message) : [],
+    replyMessageId: message?.reply_to_message?.message_id,
+    replyTopicNameLength: typeof message?.reply_to_message?.forum_topic_created?.name === 'string'
+      ? Array.from(message.reply_to_message.forum_topic_created.name).length : undefined };
 }

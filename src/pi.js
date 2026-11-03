@@ -40,13 +40,14 @@ export class PiBackend {
     if (this.options.sharedSessions && !isEnrolled(record.file)) return 'unmanaged';
     return sessionOccupant(record.file)?.channel || 'available';
   }
-  async setSessionTitle(record, title) {
+  async setSessionTitle(record, title, beforeWrite) {
     if (this.options.sharedSessions && !isEnrolled(record.file)) throw new UnmanagedSessionError();
     const lease = SessionLease.acquire(record.file, 'telegram');
     try {
       const { SessionManager } = await this.sdk();
       const manager = SessionManager.open(record.file);
       if (manager.getSessionId() !== record.id) throw new Error('Session ID mismatch');
+      await beforeWrite?.();
       manager.appendSessionInfo(title);
     } finally { lease.release(); }
   }

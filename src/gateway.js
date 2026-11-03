@@ -3,6 +3,7 @@ import { LanguageControls } from './language.js';
 import { translate, usageLabel } from './i18n.js';
 import { fallbackTitle, cleanTitle } from './titles.js';
 import { TopicTitles } from './topic-titles.js';
+import { RenameControls } from './renames.js';
 
 export class Gateway {
   constructor({ state, telegram, backend, allowedUsers, maxActive = 4, sharedSessionOwner }) {
@@ -12,6 +13,7 @@ export class Gateway {
     this.controls = new SessionControls(this);
     this.languages = new LanguageControls(this);
     this.topicTitles = new TopicTitles(this);
+    this.renames = new RenameControls(this);
     this.closing = false;
   }
   start() { this.topicTitles.start(); }
@@ -83,6 +85,7 @@ export class Gateway {
     const match = m.text.match(/^\/([a-z_]+)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
     let record = thread ? this.state.current(chat, thread) : undefined;
     if (!this.canUse(record, user, chat)) record = undefined;
+    if (await this.renames.handleReply(m, record, chat, thread, user)) return;
     if (match) {
       const command = match[1].toLowerCase(), arg = (match[2] || '').trim();
       if (command === 'help' || command === 'start') {
@@ -90,6 +93,7 @@ export class Gateway {
         if (record && !this.active.has(record.id)) return this.controls.show(record, chat, thread, user);
         return this.languages.show(chat, thread, user);
       }
+      if (command === 'rename') return arg ? this.renames.apply(record, chat, thread, user, arg) : this.renames.show(record, chat, thread, user);
       if (['language', 'lang'].includes(command) || (command === 'menu' && !record)) return this.languages.show(chat, thread, user);
       if (['menu', 'model', 'models', 'thinking', 'reasoning'].includes(command)) {
         if (!record || record.user !== user) return say(t('openSession'));
@@ -206,6 +210,8 @@ export class Gateway {
       await this.telegram.send(chat, thread, this.t(record.user, error.code === 'SESSION_BUSY' ? 'occupiedPrompt' : error.code === 'SESSION_UNMANAGED' ? 'unmanagedPrompt' : phase === 'delivery' ? 'deliveryFailed' : 'runFailed')).catch(() => {});
     } finally {
       job.stopTyping?.();
+      job.finalizing = true;
+      await this.topicTitles.wait(record.id); // Explicit rename may still be using this active SDK lease.
       if (job.cancelled) this.state.data.jobs[record.id].status = 'stopped';
       job.agent?.dispose();
       this.active.delete(record.id);
