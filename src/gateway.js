@@ -34,11 +34,10 @@ export class Gateway {
     }
     this.state.save();
   }
-  async create(chat, thread, user, title, cwd) {
+  async create(chat, user, title, cwd) {
     const info = await this.backend.create(title, cwd);
     const record = { ...info, chat, user, title, pendingTitle: true, source: 'gateway', createdAt: new Date().toISOString() };
     this.state.data.sessions[info.id] = record;
-    this.state.bind(chat, thread, info.id, user);
     return record;
   }
   async handleTopicRename(update) {
@@ -123,7 +122,8 @@ export class Gateway {
       if (record && this.active.has(record.id)) return say(t('busySwitch'));
       if (command === 'new') {
         this.controls.invalidate(chat, thread);
-        record = await this.create(chat, thread, user, t('newTitle'), record?.cwd);
+        record = await this.create(chat, user, t('newTitle'), record?.cwd);
+        this.state.bind(chat, thread, record.id, user);
         return say(t('newSession', { id: record.id }));
       }
       await this.syncShared(user, chat);
@@ -145,22 +145,17 @@ export class Gateway {
     }
     if (record && this.active.has(record.id)) return say(t('busyPrompt'));
     if (this.active.size >= this.maxActive) return say(t('limit'));
-    let stopTyping = this.telegram.startTyping?.(chat, thread);
+    const stopTyping = this.telegram.startTyping?.(chat, thread);
     try {
-      if (!thread) {
-        // Fail closed: never silently put a root message in a different session.
-        thread = await this.telegram.topic(chat, fallbackTitle(m.text, this.language(user)));
-        stopTyping?.();
-        stopTyping = this.telegram.startTyping?.(chat, thread);
-      }
-      if (!record) record = await this.create(chat, thread, user, fallbackTitle(m.text, this.language(user)));
-      this.controls.invalidate(chat, thread);
+      // A root message gets its topic only after the title is known: Telegram
+      // clients ignore editForumTopic renames in private topics (Bot API #915).
+      if (!record) record = await this.create(chat, user, fallbackTitle(m.text, this.language(user)));
+      if (thread) this.controls.invalidate(chat, thread);
       const job = { agent: null, cancelled: false, promise: null, stopTyping };
       this.active.set(record.id, job);
-      this.state.data.jobs[record.id] = { chat, thread, status: 'running', updateId: update.update_id };
+      this.state.data.jobs[record.id] = { chat, thread: thread ?? null, status: 'running', updateId: update.update_id };
       this.state.save();
       job.promise = this.run(record, m.text, chat, thread, job);
-      stopTyping = undefined; // Lifecycle ownership transferred to the run.
     } finally { stopTyping?.(); }
   }
   async run(record, text, chat, thread, job) {
@@ -176,6 +171,20 @@ export class Gateway {
         if (job.cancelled) return;
         if (record.pendingTitle && (record.titleVersion || 0) === version) {
           const title = cleanTitle(suggested || '') || fallbackTitle(text, this.language(record.user));
+          if (!thread) {
+            thread = await this.telegram.topic(chat, title);
+            job.stopTyping?.();
+            job.stopTyping = this.telegram.startTyping?.(chat, thread);
+            this.state.bind(chat, thread, record.id, record.user);
+            this.state.data.jobs[record.id].thread = thread;
+            this.controls.invalidate(chat, thread);
+            job.agent.setTitle(title);
+            record.title = title;
+            record.pendingTitle = false;
+            this.state.save();
+            await this.finishTurn(record, text, chat, thread, job, phase);
+            return;
+          }
           try {
             // Keep the existing session lease throughout both name changes.
             this.topicTitles.namingTargets.set(record.id, title);
@@ -197,13 +206,7 @@ export class Gateway {
         }
         await this.topicTitles.flush(record, job.agent);
       }
-      const reply = await job.agent.prompt(text);
-      job.stopTyping?.();
-      phase = 'delivery';
-      this.state.data.jobs[record.id].status = 'reply-pending';
-      this.state.save();
-      await this.telegram.send(chat, thread, reply || this.t(record.user, 'noText'));
-      this.state.data.jobs[record.id].status = job.cancelled ? 'stopped' : 'done';
+      await this.finishTurn(record, text, chat, thread, job, phase);
     } catch (error) {
       job.stopTyping?.();
       this.state.data.jobs[record.id].status = phase === 'delivery' ? 'delivery-uncertain' : 'failed';
@@ -216,6 +219,21 @@ export class Gateway {
       job.agent?.dispose();
       this.active.delete(record.id);
       this.state.save();
+    }
+  }
+  async finishTurn(record, text, chat, thread, job, phase) {
+    try {
+      const reply = await job.agent.prompt(text);
+      job.stopTyping?.();
+      phase = 'delivery';
+      this.state.data.jobs[record.id].status = 'reply-pending';
+      this.state.save();
+      await this.telegram.send(chat, thread, reply || this.t(record.user, 'noText'));
+      this.state.data.jobs[record.id].status = job.cancelled ? 'stopped' : 'done';
+    } catch (error) {
+      job.stopTyping?.();
+      this.state.data.jobs[record.id].status = phase === 'delivery' ? 'delivery-uncertain' : 'failed';
+      await this.telegram.send(chat, thread, this.t(record.user, error.code === 'SESSION_BUSY' ? 'occupiedPrompt' : error.code === 'SESSION_UNMANAGED' ? 'unmanagedPrompt' : phase === 'delivery' ? 'deliveryFailed' : 'runFailed')).catch(() => {});
     }
   }
   async recover() {

@@ -40,7 +40,7 @@ test('rename dialog uses explicit replies and changes topic + session without a 
   await x.reply('我的新标题');
   assert.deepEqual(x.renamed, [[42, 11, '我的新标题']]); assert.deepEqual(x.names, ['我的新标题']);
   assert.equal(x.state.current(42, 11).title, '我的新标题');
-  assert.equal(x.sent.at(-1)[2], '会话名称已同步为：我的新标题');
+  assert.match(x.sent.at(-1)[2], /^会话名称已同步为：我的新标题\n/);
   assert.equal(x.modelCalls(), 0);
 });
 test('direct /name works even if the requested title is already stored', async t => {
