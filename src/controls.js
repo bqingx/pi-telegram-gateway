@@ -80,7 +80,15 @@ export class SessionControls {
       if (model.cost) text += `\n${t('catalogCost', { input: model.cost.input ?? t('priceUnknown'), output: model.cost.output ?? t('priceUnknown') })}`;
       text += `\n${t('modelWarning')}`;
       rows.push([button(t('confirm'), { type: 'model', provider: model.provider, id: model.id })]);
+      rows.push([button(t('confirmGlobal'), navigate({ kind: 'globalConfirm', model }))]);
       rows.push([button(`◀ ${t('model')}`, navigate({ kind: 'models', provider: model.provider })), cancel()]);
+    } else if (view.kind === 'globalConfirm') {
+      const model = view.model;
+      text += `\n\n${t('switchTo', { provider: model.provider, id: model.id })}`;
+      if (model.cost) text += `\n${t('catalogCost', { input: model.cost.input ?? t('priceUnknown'), output: model.cost.output ?? t('priceUnknown') })}`;
+      text += `\n${t('globalWarning')}`;
+      rows.push([button(t('confirmGlobalFinal'), { type: 'modelGlobal', provider: model.provider, id: model.id })]);
+      rows.push([button(`◀ ${t('model')}`, navigate({ kind: 'confirm', model })), cancel()]);
     } else if (view.kind === 'thinking') {
       text += `\n\n${t('chooseThinking')}`;
       if (menu.config.levels.length <= 1) text += `\n${t('noThinking')}`;
@@ -144,11 +152,14 @@ export class SessionControls {
       } else {
         this.invalidate(menu.chat, menu.thread); // Consume before effects, never replay a stale click.
         if (action.type === 'model') await agent.setModel(action.provider, action.id);
+        else if (action.type === 'modelGlobal') await agent.setModel(action.provider, action.id, { global: true });
         else if (action.type === 'thinking') await agent.setThinking(action.level);
         else throw new Error('Unknown action');
-        await g.telegram.editPanel(menu.chat, menu.messageId, t('saved', { summary: summary(agent.config(), g.language(menu.user)) }));
+        const saved = t(action.type === 'modelGlobal' ? 'savedGlobal' : 'saved', { summary: summary(agent.config(), g.language(menu.user)) });
+        await g.telegram.editPanel(menu.chat, menu.messageId, saved);
       }
     } catch (error) {
+      if (process.env.PI_TELEGRAM_DEBUG === '1') console.error('[settings]', error?.message);
       this.invalidate(menu.chat, menu.thread);
       await g.telegram.editPanel(menu.chat, menu.messageId, t(error.code === 'SESSION_BUSY' ? 'occupiedMenu' : 'selectionFailed')).catch(() => {});
     } finally { agent?.dispose(); }

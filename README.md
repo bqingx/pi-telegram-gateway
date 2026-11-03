@@ -80,7 +80,7 @@ The model picker lists only providers/models currently available through the pi 
 
 Thinking choices come from `getAvailableThinkingLevels()` rather than a hardcoded list; the provider may further clamp them. A nonreasoning model reports that reasoning is not adjustable. Model switches can reset/clamp effort, and the success message shows the actual SDK value.
 
-Changes are persisted **only to the current session**, not global pi defaults or other topics. Empty `/new` sessions restore their choice too. An unavailable saved model fails closed rather than silently submitting to a fallback provider; restore its local pi configuration/credentials before continuing.
+Changes are persisted **only to the current session** by default, not global pi defaults or other topics. The model confirmation page also offers **Set as global default…**, which requires a second explicit **Confirm global default** tap: that writes the machine-wide pi default for every newly created session (including other projects) and applies to this session; existing sessions keep their own model. Empty `/new` sessions restore their choice too. An unavailable saved model fails closed rather than silently submitting to a fallback provider; restore its local pi configuration/credentials before continuing.
 
 Pickers are bound to their requesting user, chat, topic, message and session. They expire after ten minutes, after a new prompt/session switch, or on restart; older pages cannot apply a stale selection. Open a fresh menu if settings changed elsewhere. Running sessions reject settings changes. `callback_query` updates are authenticated independently, and confirmation/error messages never include raw SDK exceptions. Do not run another service that overwrites this bot's command menu.
 

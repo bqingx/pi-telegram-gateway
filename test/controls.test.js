@@ -52,7 +52,7 @@ test('menu -> providers -> paginated models -> confirmation -> apply', async t =
   assert.match(x.panels.at(-1).text, /2\/2/);
   await x.click('model-10');
   assert.equal(x.changes.length, 0); assert.match(x.panels.at(-1).text, /billing may change/);
-  const query = await x.click('Confirm');
+  const query = await x.click('This session only');
   assert.deepEqual(x.changes, [['model', 'test', 'model-10']]);
   assert.equal(x.panels.at(-1).keyboard.length, 0);
   await x.gateway.handle({ callback_query: query });
@@ -147,4 +147,33 @@ test('register bot command menu and Telegram inline-keyboard payloads', async t 
   assert.equal(calls.at(-1)[1].message_thread_id, 11);
   await api.editPanel(42, 1, 'done'); assert.deepEqual(calls.at(-1)[1].reply_markup.inline_keyboard, []);
   await api.answer('q', 'ok'); assert.equal(calls.at(-1)[0], 'answerCallbackQuery');
+});
+test('global default requires a second explicit confirmation and is reported as machine-wide', async t => {
+  const x = await setup(t);
+  const calls = [];
+  const original = x.gateway.backend.open;
+  x.gateway.backend.open = async record => {
+    const agent = await original(record);
+    return { ...agent, setModel: async (provider, id, options) => { calls.push([provider, id, options]); } };
+  };
+  await x.click('Model'); await x.click('test'); await x.click('Next'); await x.click('model-10');
+  assert.equal(calls.length, 0);
+  await x.click('global default');
+  assert.match(x.panels.at(-1).text, /machine-wide|全局/);
+  assert.equal(calls.length, 0, 'global apply must need the final confirmation');
+  await x.click('Confirm global');
+  assert.deepEqual(calls, [['test', 'model-10', { global: true }]]);
+  assert.match(x.panels.at(-1).text, /global default/i);
+  assert.equal(x.panels.at(-1).keyboard.length, 0);
+});
+test('session-only switch never requests the global persist flag', async t => {
+  const x = await setup(t);
+  const calls = [];
+  const original = x.gateway.backend.open;
+  x.gateway.backend.open = async record => {
+    const agent = await original(record);
+    return { ...agent, setModel: async (provider, id, options) => { calls.push(options); } };
+  };
+  await x.click('Model'); await x.click('test'); await x.click('Next'); await x.click('model-10'); await x.click('This session only');
+  assert.deepEqual(calls, [undefined]);
 });

@@ -114,10 +114,11 @@ export class PiBackend {
       models: async () => (await session.modelRuntime.getAvailable()).map(model => ({
         provider: model.provider, id: model.id, name: model.name, cost: model.cost,
       })),
-      setModel: async (provider, id) => {
+      setModel: async (provider, id, { global = false } = {}) => {
         const model = (await session.modelRuntime.getAvailable()).find(model => model.provider === provider && model.id === id);
         if (!model) throw new Error('Model unavailable');
-        await session.setModel(model, { persist: false });
+        // persist:true also writes the machine-wide default for new sessions.
+        await session.setModel(model, { persist: global === true });
       },
       setThinking: level => {
         if (!session.model || !session.getAvailableThinkingLevels().includes(level)) throw new Error('Unsupported thinking level');
