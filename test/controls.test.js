@@ -11,6 +11,7 @@ async function setup(t, models = Array.from({ length: 12 }, (_, i) => ({ provide
   const dir = mkdtempSync(join(tmpdir(), 'pi-controls-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const state = new State(dir), panels = [], answers = [], sends = [], changes = [];
+  state.setLanguage(42, 'en');
   let mid = 100, config = { model: { provider: 'test', id: 'model-00' }, thinking: 'low', levels: ['off', 'low', 'high'] };
   const telegram = {
     send: async (...args) => sends.push(args),
@@ -47,7 +48,7 @@ test('menu -> providers -> paginated models -> confirmation -> apply', async t =
   assert.match(x.panels[0].text, /test\/model-00/);
   await x.click('Model'); await x.click('test');
   assert.match(x.panels.at(-1).text, /1\/2/);
-  await x.click('下一页');
+  await x.click('Next');
   assert.match(x.panels.at(-1).text, /2\/2/);
   await x.click('model-10');
   assert.equal(x.changes.length, 0); assert.match(x.panels.at(-1).text, /billing may change/);
@@ -72,7 +73,7 @@ test('stale button from a previous page or replaced menu cannot act', async t =>
   const old = x.panels[0].keyboard[0][1].callback_data;
   await x.click('Model');
   await x.gateway.handle({ callback_query: { id: 'old', from: { id: 42 }, message: { message_id: 101, chat: { id: 42, type: 'private' }, message_thread_id: 11 }, data: old } });
-  assert.match(x.answers.at(-1)[1], /失效/); assert.equal(x.changes.length, 0);
+  assert.match(x.answers.at(-1)[1], /expired/); assert.equal(x.changes.length, 0);
 });
 test('unauthorized users and other allowlisted users cannot use owner menu', async t => {
   const x = await setup(t);
@@ -102,18 +103,18 @@ test('busy topic rejects callback and settings command', async t => {
 test('new session invalidates old menu', async t => {
   const x = await setup(t);
   await x.command('/new'); await x.click('Thinking');
-  assert.match(x.answers.at(-1)[1], /失效/); assert.equal(x.changes.length, 0);
+  assert.match(x.answers.at(-1)[1], /expired/); assert.equal(x.changes.length, 0);
 });
 test('expired/restarted menus do not apply settings', async t => {
   const x = await setup(t);
   for (const menu of x.gateway.controls.menus.values()) menu.expires = 0;
-  await x.click('Thinking'); assert.match(x.answers.at(-1)[1], /失效/);
+  await x.click('Thinking'); assert.match(x.answers.at(-1)[1], /expired/);
   x.gateway.controls.menus.clear(); await x.click('Thinking'); assert.equal(x.changes.length, 0);
 });
 test('external configuration change makes menu stale', async t => {
   const x = await setup(t);
   x.setConfig({ model: { provider: 'test', id: 'different' }, thinking: 'low', levels: ['off'] });
-  await x.click('Thinking'); assert.match(x.panels.at(-1).text, /已变化/);
+  await x.click('Thinking'); assert.match(x.panels.at(-1).text, /changed/);
   assert.equal(x.changes.length, 0);
 });
 test('long Unicode model IDs remain server-side; callback_data <= 64 bytes', async t => {

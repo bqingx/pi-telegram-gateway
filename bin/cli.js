@@ -61,6 +61,11 @@ async function main() {
     gateway = new Gateway({ state, telegram, backend: new PiBackend(config.cwd, config.dataDir, { sharedSessions: config.sharedSessionOwner != null }),
       allowedUsers: config.allowedUsers, maxActive: config.maxActive ?? 4, sharedSessionOwner: config.sharedSessionOwner });
     await telegram.registerCommands();
+    for (const [user, language] of Object.entries(state.data.languages || {})) {
+      if (!config.allowedUsers.includes(Number(user))) continue;
+      await telegram.registerCommands(language === 'en' ? 'en' : 'zh', Number(user))
+        .catch(() => console.error('Per-user command menu refresh failed; select /language to retry.'));
+    }
     await gateway.recover();
     console.log('Gateway ready (private topics; allowlist enforced).');
     let failures = 0;
@@ -88,7 +93,7 @@ async function main() {
           const m = update.message;
           if (m?.chat?.type === 'private' && config.allowedUsers.includes(m.from?.id)) {
             await telegram.send(m.chat.id, m.message_thread_id === 1 ? undefined : m.message_thread_id,
-              'Request failed after admission and was not retried. Topic/session creation or other effects may be partial. Check /sessions before trying again.').catch(() => {});
+              gateway.t(m.from.id, 'updateFailed')).catch(() => {});
           }
         }
       }

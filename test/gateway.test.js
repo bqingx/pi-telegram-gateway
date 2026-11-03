@@ -12,8 +12,10 @@ function setup(t, { slow = false, maxActive = 4 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'pi-tg-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const state = new State(dir), sent = [], prompts = [];
+  state.setLanguage(42, 'en');
   let topic = 10, session = 0, release;
-  const telegram = { send: async (...args) => { sent.push(args); }, topic: async () => ++topic };
+  const telegram = { send: async (...args) => { sent.push(args); }, topic: async () => ++topic,
+    panel: async (chat, thread, text) => { sent.push([chat, thread, text]); return { message_id: 1 }; } };
   const backend = {
     create: async () => ({ id: `s${++session}`, file: '/fake' }),
     open: async record => ({

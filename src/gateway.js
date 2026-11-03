@@ -1,16 +1,6 @@
 import { SessionControls } from './controls.js';
-
-const HELP = `/menu — settings buttons for this session
-/model, /models — choose provider and model
-/thinking, /reasoning — choose reasoning effort
-/topic — show current binding (root: list sessions)
-/topic <session-id> — restore an unbound session in this topic
-/sessions [page] — list your sessions
-/new — fresh session in this topic, keep old history
-/status — current session and running state
-/stop — abort this topic's active run
-/help — this help
-Send a normal message in the root DM to create a new topic + session.`;
+import { LanguageControls } from './language.js';
+import { translate, usageLabel } from './i18n.js';
 
 export class Gateway {
   constructor({ state, telegram, backend, allowedUsers, maxActive = 4, sharedSessionOwner }) {
@@ -18,8 +8,12 @@ export class Gateway {
     this.allowed = new Set(allowedUsers);
     this.active = new Map();
     this.controls = new SessionControls(this);
+    this.languages = new LanguageControls(this);
     this.closing = false;
   }
+  language(user) { return this.state.language(user); }
+  t(user, key, params) { return translate(this.language(user), key, params); }
+  usage(user, code) { return usageLabel(this.language(user), code); }
   canUse(record, user, chat) {
     return record && record.user === user && record.chat === chat && (record.source !== 'local' || user === this.sharedSessionOwner);
   }
@@ -28,7 +22,7 @@ export class Gateway {
     for (const item of await this.backend.listShared()) {
       const existing = this.state.data.sessions[item.id];
       if (existing && (existing.user !== user || existing.chat !== chat || existing.file !== item.file)) continue;
-      this.state.data.sessions[item.id] = { ...item, ...existing, source: existing ? (existing.source || 'gateway') : 'local', title: item.title, modifiedAt: item.modifiedAt, user, chat };
+      this.state.data.sessions[item.id] = { ...item, ...existing, source: existing ? (existing.source || 'gateway') : 'local', title: item.title || this.t(user, 'untitled'), modifiedAt: item.modifiedAt, user, chat };
     }
     this.state.save();
   }
@@ -40,13 +34,14 @@ export class Gateway {
     return record;
   }
   async handle(update) {
-    if (update.callback_query) return this.controls.callback(update.callback_query);
+    if (update.callback_query) return update.callback_query.data?.startsWith('pl:') ? this.languages.callback(update.callback_query) : this.controls.callback(update.callback_query);
     const m = update.message;
     if (this.closing || !m || m.chat?.type !== 'private' || m.from?.is_bot || !this.allowed.has(m.from?.id)) return;
     const chat = m.chat.id, user = m.from.id;
     // Telegram General may arrive with thread_id=1 or no thread id.
     let thread = m.message_thread_id === 1 ? undefined : m.message_thread_id;
     const say = text => this.telegram.send(chat, thread, text);
+    const t = (key, params) => this.t(user, key, params);
     if (m.forum_topic_deleted && thread) {
       delete this.state.data.bindings[this.state.key(chat, thread)];
       this.state.save();
@@ -54,7 +49,7 @@ export class Gateway {
     }
     if (m.forum_topic_created || m.forum_topic_edited || m.forum_topic_closed || m.forum_topic_reopened) return;
     if (!m.text) {
-      await say('This version accepts text only; attachments are not processed.');
+      await say(t('textOnly'));
       return;
     }
     const match = m.text.match(/^\/([a-z_]+)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
@@ -63,13 +58,14 @@ export class Gateway {
     if (match) {
       const command = match[1].toLowerCase(), arg = (match[2] || '').trim();
       if (command === 'help' || command === 'start') {
-        await say(HELP);
+        await say(t('help'));
         if (record && !this.active.has(record.id)) return this.controls.show(record, chat, thread, user);
-        return;
+        return this.languages.show(chat, thread, user);
       }
+      if (['language', 'lang'].includes(command) || (command === 'menu' && !record)) return this.languages.show(chat, thread, user);
       if (['menu', 'model', 'models', 'thinking', 'reasoning'].includes(command)) {
-        if (!record || record.user !== user) return say('请进入话题，并先发送消息或点选 /new。Open a topic and send a message or use /new first.');
-        if (this.active.has(record.id)) return say('Session is busy. Wait for it to finish or use /stop.');
+        if (!record || record.user !== user) return say(t('openSession'));
+        if (this.active.has(record.id)) return say(t('busy'));
         const kind = ['model', 'models'].includes(command) ? 'providers' : ['thinking', 'reasoning'].includes(command) ? 'thinking' : 'home';
         return this.controls.show(record, chat, thread, user, { kind });
       }
@@ -80,54 +76,52 @@ export class Gateway {
         const page = Math.max(1, Number.parseInt(arg, 10) || 1);
         const items = all.slice((page - 1) * 10, page * 10);
         const bound = new Set(Object.values(this.state.data.bindings));
-        return say(`Sessions (page ${page}/${Math.max(1, Math.ceil(all.length / 10))}):\n` + (items.map(s => `${s.id}\n${s.title} ${bound.has(s.id) ? '[bound]' : '[available]'}${this.sharedSessionOwner === user ? ` [${this.backend.usage(s)}]` : ''}`).join('\n\n') || '(none)'));
+        return say(t('sessions', { page, pages: Math.max(1, Math.ceil(all.length / 10)), items: items.map(s => `${s.id}\n${s.title} [${t(bound.has(s.id) ? 'bound' : 'available')}]${this.sharedSessionOwner === user ? ` [${this.usage(user, this.backend.usage(s))}]` : ''}`).join('\n\n') || t('none') }));
       }
-      if (!thread) return say('Open a topic first, or send a normal message here to create one.');
+      if (!thread) return say(t('openTopic'));
       if (command === 'stop') {
         const job = record && this.active.get(record.id);
         if (job) { job.cancelled = true; job.stopTyping?.(); await job.agent?.abort(); }
-        return say(job ? 'Stop requested. Already executed tool effects cannot be undone.' : 'No active run.');
+        return say(t(job ? 'stopRequested' : 'noActive'));
       }
       if (command === 'status' || (command === 'topic' && !arg)) {
-        return say(record ? `${record.title}\n${record.id}\n${this.active.has(record.id) ? 'Running' : `Idle (${this.backend.usage?.(record) || 'available'})`}` : 'No session bound yet.');
+        return say(record ? t('status', { title: record.title, id: record.id, state: this.active.has(record.id) ? t('running') : t('idle', { usage: this.usage(user, this.backend.usage?.(record) || 'available') }) }) : t('noBinding'));
       }
-      if (!['new', 'topic'].includes(command)) return say('Unknown command. Use /help.');
-      if (record && this.active.has(record.id)) return say('Session is busy. Use /stop and wait before switching.');
+      if (!['new', 'topic'].includes(command)) return say(t('unknownCommand'));
+      if (record && this.active.has(record.id)) return say(t('busySwitch'));
       if (command === 'new') {
         this.controls.invalidate(chat, thread);
-        record = await this.create(chat, thread, user, 'New conversation', record?.cwd);
-        return say(`New session: ${record.id}`);
+        record = await this.create(chat, thread, user, t('newTitle'), record?.cwd);
+        return say(t('newSession', { id: record.id }));
       }
       await this.syncShared(user, chat);
       try { this.state.assertBindable(chat, thread, arg, user); }
-      catch { return say('Cannot switch: session missing, belongs elsewhere, or is bound to another topic.'); }
+      catch { return say(t('cannotSwitch')); }
       const target = this.state.data.sessions[arg];
-      if (!this.canUse(target, user, chat)) return say('Cannot switch: shared access is not authorized.');
+      if (!this.canUse(target, user, chat)) return say(t('sharedDenied'));
       let agent;
       try {
         agent = await this.backend.open(target); // Lock before changing the binding or opening SDK history.
         this.state.bind(chat, thread, arg, user);
         this.controls.invalidate(chat, thread);
-        await say(`Restored: ${target.title}\n${target.id}`);
+        await say(t('restored', { title: target.title, id: target.id }));
         const last = agent.last(); if (last) await say(last);
       } catch (error) {
-        await say(error.code === 'SESSION_BUSY' ? 'Session is occupied locally or by Telegram. Close the other endpoint first; nothing was switched.' :
-          error.code === 'SESSION_UNMANAGED' ? 'This local session is not guarded yet. Close ordinary pi windows, then run pi-shared --enroll <session-id> locally before restoring it here.' :
-          'Session could not be opened or its confirmation was not delivered. Check /topic before retrying.');
+        await say(t(error.code === 'SESSION_BUSY' ? 'occupiedRestore' : error.code === 'SESSION_UNMANAGED' ? 'unmanagedRestore' : 'restoreFailed'));
       } finally { agent?.dispose(); }
       return;
     }
-    if (record && this.active.has(record.id)) return say('This session is busy. Wait for its reply or use /stop; this message was not queued.');
-    if (this.active.size >= this.maxActive) return say('Gateway concurrency limit reached; try again later.');
+    if (record && this.active.has(record.id)) return say(t('busyPrompt'));
+    if (this.active.size >= this.maxActive) return say(t('limit'));
     let stopTyping = this.telegram.startTyping?.(chat, thread);
     try {
       if (!thread) {
         // Fail closed: never silently put a root message in a different session.
-        thread = await this.telegram.topic(chat, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || 'Pi Chat');
+        thread = await this.telegram.topic(chat, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || t('topicTitle'));
         stopTyping?.();
         stopTyping = this.telegram.startTyping?.(chat, thread);
       }
-      if (!record) record = await this.create(chat, thread, user, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || 'Pi Chat');
+      if (!record) record = await this.create(chat, thread, user, Array.from(m.text.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') || t('topicTitle'));
       this.controls.invalidate(chat, thread);
       const job = { agent: null, cancelled: false, promise: null, stopTyping };
       this.active.set(record.id, job);
@@ -147,15 +141,12 @@ export class Gateway {
       phase = 'delivery';
       this.state.data.jobs[record.id].status = 'reply-pending';
       this.state.save();
-      await this.telegram.send(chat, thread, reply);
+      await this.telegram.send(chat, thread, reply || this.t(record.user, 'noText'));
       this.state.data.jobs[record.id].status = job.cancelled ? 'stopped' : 'done';
     } catch (error) {
       job.stopTyping?.();
       this.state.data.jobs[record.id].status = phase === 'delivery' ? 'delivery-uncertain' : 'failed';
-      await this.telegram.send(chat, thread, error.code === 'SESSION_BUSY' ? 'Session is occupied locally or by another Telegram operation. Close the other endpoint and send again; this message was not executed.' :
-        error.code === 'SESSION_UNMANAGED' ? 'This local session must first be enrolled with pi-shared --enroll <session-id> after closing ordinary pi windows. No prompt was executed.' : phase === 'delivery'
-        ? 'Reply delivery failed or is uncertain. Use /topic <same-session-id> when idle to replay the last reply. Do not repeat side-effecting instructions blindly.'
-        : 'Run failed. History is preserved; check /status. Tool effects may already have occurred; nothing was automatically retried.').catch(() => {});
+      await this.telegram.send(chat, thread, this.t(record.user, error.code === 'SESSION_BUSY' ? 'occupiedPrompt' : error.code === 'SESSION_UNMANAGED' ? 'unmanagedPrompt' : phase === 'delivery' ? 'deliveryFailed' : 'runFailed')).catch(() => {});
     } finally {
       job.stopTyping?.();
       if (job.cancelled) this.state.data.jobs[record.id].status = 'stopped';
@@ -165,11 +156,11 @@ export class Gateway {
     }
   }
   async recover() {
-    for (const job of Object.values(this.state.data.jobs)) {
+    for (const [id, job] of Object.entries(this.state.data.jobs)) {
       if (['running', 'reply-pending'].includes(job.status)) {
         job.status = 'interrupted';
         this.state.save();
-        await this.telegram.send(job.chat, job.thread, 'Gateway restarted during a run. It will not replay the instruction automatically. Check the session and any external effects before retrying.').catch(() => {});
+        await this.telegram.send(job.chat, job.thread, this.t(this.state.data.sessions[id]?.user ?? job.chat, 'interrupted')).catch(() => {});
       }
     }
   }

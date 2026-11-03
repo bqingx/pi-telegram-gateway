@@ -72,6 +72,7 @@ test('another process holding a local session excludes Telegram', async t => {
 });
 test('shared list exposes local metadata only to the configured Telegram owner', async t => {
   const { file, dir } = fixture(t), state = new State(join(dir, 'state'));
+  state.setLanguage(42, 'en');
   const sent = [], backend = {
     listShared: async () => [{ id: 'local-1', file, cwd: dir, title: 'Local history', createdAt: '2026-01-01', modifiedAt: '2026-01-02' }],
     usage: () => 'unmanaged',
@@ -86,6 +87,7 @@ test('shared list exposes local metadata only to the configured Telegram owner',
 });
 test('failed occupied restore leaves the previous Telegram binding unchanged', async t => {
   const { file, dir } = fixture(t), state = new State(join(dir, 'state')), sent = [];
+  state.setLanguage(42, 'en');
   for (const id of ['old', 'target']) state.data.sessions[id] = { id, user: 42, chat: 42, file, title: id, createdAt: '2026-01-01' };
   state.bind(42, 11, 'old', 42);
   const g = new Gateway({ state, telegram: { send: async (...a) => sent.push(a) },

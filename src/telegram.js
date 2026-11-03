@@ -1,3 +1,5 @@
+import { translate } from './i18n.js';
+
 export function splitText(text, limit = 3500) {
   const chunks = [];
   let chunk = '';
@@ -32,7 +34,7 @@ export class Telegram {
     return data.result;
   }
   async send(chat, thread, text) {
-    for (const part of splitText(text || '(No text response)')) {
+    for (const part of splitText(text || translate('zh', 'noText'))) {
       await this.call('sendMessage', { chat_id: chat, ...(thread ? { message_thread_id: thread } : {}), text: part });
     }
   }
@@ -92,19 +94,11 @@ export class Telegram {
   async answer(query, text = '') {
     return this.call('answerCallbackQuery', { callback_query_id: query, text });
   }
-  async registerCommands() {
-    await this.call('setMyCommands', { commands: [
-      { command: 'menu', description: 'Session settings / 会话设置' },
-      { command: 'model', description: 'Choose model / 选择模型' },
-      { command: 'thinking', description: 'Reasoning effort / 推理强度' },
-      { command: 'sessions', description: 'List sessions / 会话列表' },
-      { command: 'new', description: 'Fresh session in this topic' },
-      { command: 'topic', description: 'Current session binding' },
-      { command: 'status', description: 'Session status' },
-      { command: 'stop', description: 'Stop current run' },
-      { command: 'help', description: 'Help' },
-    ] });
-    await this.call('setChatMenuButton', { menu_button: { type: 'commands' } });
+  async registerCommands(language = 'zh', chat) {
+    const commands = ['menu', 'model', 'thinking', 'language', 'sessions', 'new', 'topic', 'status', 'stop', 'help']
+      .map(command => ({ command, description: translate(language, `cmd_${command}`) }));
+    await this.call('setMyCommands', { commands, ...(chat ? { scope: { type: 'chat', chat_id: chat } } : {}) });
+    await this.call('setChatMenuButton', { ...(chat ? { chat_id: chat } : {}), menu_button: { type: 'commands' } });
   }
   async topic(chat, name) {
     const result = await this.call('createForumTopic', { chat_id: chat, name });

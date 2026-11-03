@@ -23,6 +23,13 @@ export class State {
     const parent = openSync(join(this.file, '..'), 'r');
     try { fsyncSync(parent); } finally { closeSync(parent); }
   }
+  language(user) { return this.data.languages?.[String(user)] === 'en' ? 'en' : 'zh'; }
+  setLanguage(user, language) {
+    if (!['zh', 'en'].includes(language)) throw new Error('Unsupported language');
+    this.data.languages ??= {};
+    this.data.languages[String(user)] = language;
+    this.save();
+  }
   key(chat, thread) { return `${chat}:${thread}`; }
   current(chat, thread) {
     return this.data.sessions[this.data.bindings[this.key(chat, thread)]];

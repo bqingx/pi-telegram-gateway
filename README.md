@@ -8,7 +8,7 @@ A standalone Telegram gateway for [pi](https://github.com/earendil-works/pi). In
 
 ## Status
 
-Early **0.3.0** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
+Early **0.4.0** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
 
 ## Install
 
@@ -55,6 +55,7 @@ No public port or webhook is needed. Model calls can incur your provider's norma
 | `/menu` | Current model/thinking and inline settings buttons |
 | `/model`, `/models` | Provider → paginated models → confirmation buttons |
 | `/thinking`, `/reasoning` | Supported reasoning-effort buttons (current level marked ✓) |
+| `/language`, `/lang` | Chinese / English interface-language buttons; no session needed |
 | `/topic` | Topic: current binding. Root: session list |
 | `/topic <session-id>` | Restore a session in this topic; replay its latest assistant text |
 | `/sessions [page]` | List this user's gateway sessions in this chat (10/page) |
@@ -62,9 +63,17 @@ No public port or webhook is needed. Model calls can incur your provider's norma
 | `/status` | Binding and in-process running/idle state |
 | `/stop` | Abort this topic's run; does not undo tool effects |
 
+### Interface language
+
+The gateway's Telegram interface defaults to **Chinese**, independently of Telegram's client language. Choose **切换语言** from the bot's command menu, or tap **语言** in session settings (`/menu`), to select **中文 / English**. `/language` and `/lang` also open the buttons. Root DMs, unbound topics and busy sessions can change language without opening pi or making a model request.
+
+The preference is persisted per numeric Telegram user in `state.json` (`languages`) and applies across their topics, including after restart. Help, command descriptions, session/status labels, model/thinking menus, confirmations, callback toasts, errors and restart warnings follow that user's selection. Command descriptions use a **chat-scoped override**, not a global language change for other users. If updating Telegram's command menu fails, the preference remains saved and a localized warning asks you to select it again to retry. Selecting a language invalidates that user's older settings buttons.
+
+Command names (Telegram requires Latin command identifiers), model/provider IDs, user-authored titles/messages and actual assistant responses are not automatically translated or rewritten. Switching UI language does not alter model settings, session contents or ask the model to translate existing messages. Previously sent messages stay in their original language; open a fresh menu to see the new language.
+
 ### Button-based model and reasoning settings
 
-On startup the gateway registers Telegram's built-in **command menu** and sets the chat menu button to commands. Pick **menu**, **model** or **thinking** from that menu without typing model names/IDs or effort values. Inside a topic, `/menu` also opens inline **Model / Thinking** buttons. Use `/new` or send a message first if the topic has no session.
+On startup the gateway registers Telegram's built-in **command menu** and sets the chat menu button to commands. Pick **menu**, **model** or **thinking** from that menu without typing model names/IDs or effort values. Inside a topic, `/menu` also opens inline **模型 / 推理强度** buttons (or **Model / Thinking** after selecting English). Use `/new` or send a message first if the topic has no session.
 
 The model picker lists only providers/models currently available through the pi SDK (including configured compatible endpoints), offers pagination/back/close buttons and marks the current selection. Choosing a model opens a confirmation showing catalog token prices when available and a reminder that future prompts send this conversation's context to the chosen provider. This is an estimate, not a billing guarantee; switching alone sends no model prompt. Actual provider availability, quota and pricing can still change.
 

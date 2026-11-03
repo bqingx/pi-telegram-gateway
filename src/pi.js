@@ -31,7 +31,7 @@ export class PiBackend {
     const all = [...await SessionManager.listAll(), ...await SessionManager.listAll(this.dir)];
     const seen = new Set();
     return all.filter(s => !seen.has(s.path) && seen.add(s.path)).map(s => ({
-      id: s.id, file: s.path, cwd: s.cwd, title: (s.name || s.firstMessage || 'Untitled session').replace(/\s+/g, ' ').slice(0, 120),
+      id: s.id, file: s.path, cwd: s.cwd, title: (s.name || s.firstMessage || '').replace(/\s+/g, ' ').slice(0, 120),
       createdAt: s.created.toISOString(), modifiedAt: s.modified.toISOString(), source: 'local',
     }));
   }
@@ -75,7 +75,7 @@ export class PiBackend {
         try {
           await session.prompt(text, { expandPromptTemplates: false });
           if (finalMessage?.stopReason === 'error') throw new Error('Model run failed');
-          return finalMessage?.content?.filter(block => block.type === 'text').map(block => block.text).join('\n') || '(No text response)';
+          return finalMessage?.content?.filter(block => block.type === 'text').map(block => block.text).join('\n') || '';
         } finally { unsubscribe(); }
       },
       config: () => ({
