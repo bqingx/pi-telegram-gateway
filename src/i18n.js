@@ -1,6 +1,6 @@
 export const messages = {
   zh: {
-    help: '/menu — 会话设置按钮\n/model、/models — 选择提供商和模型\n/thinking、/reasoning — 选择推理强度\n/language — 切换界面语言\n/rename — 同时重命名话题与会话\n/topic — 查看绑定（根私聊中显示会话列表）\n/topic <会话ID> — 在当前话题恢复会话\n/sessions [页码] — 查看会话列表\n/new — 当前话题开启新会话，保留旧历史\n/status — 查看状态\n/stop — 停止当前任务\n/help — 帮助\n在根私聊发送普通消息，即可创建新话题和新会话。',
+    help: '/menu — 会话设置按钮\n/model、/models — 选择提供商和模型\n/thinking、/reasoning — 选择推理强度\n/language — 切换界面语言\n/name 新名称 — 同时修改话题与会话名称\n/topic — 查看绑定（根私聊中显示会话列表）\n/topic <会话ID> — 在当前话题恢复会话\n/sessions [页码] — 查看会话列表\n/new — 当前话题开启新会话，保留旧历史\n/status — 查看状态\n/stop — 停止当前任务\n/help — 帮助\n在根私聊发送普通消息，即可创建新话题和新会话。',
     textOnly: '当前版本只支持文字消息，暂不处理附件。',
     openSession: '请进入话题，先发送消息或使用 /new 创建会话。',
     busy: '会话正在处理任务，请等待完成，或使用 /stop 停止。',
@@ -44,16 +44,16 @@ export const messages = {
     rename: '重命名话题与会话',
     renamePrompt: '请回复此消息，输入新的话题与会话名称（1–128 字）。本次只修改名称，不调用模型；回复 /cancel 可取消。',
     renamePlaceholder: '输入新名称', renameInvalid: '名称须为 1–128 字，请重新点“重命名”后输入。',
-    renameExpired: '重命名请求已过期或会话已切换，请重新使用 /rename。', renameCancelled: '已取消重命名。',
+    renameExpired: '重命名请求已过期或会话已切换，请重新使用 /name 新名称。', renameCancelled: '已取消重命名。',
     renameFailed: 'Telegram 拒绝重命名，请检查话题是否存在、权限是否有效，再重新操作。本次未调用模型。',
     language: '语言', languageTitle: '界面语言：{language}\n请选择语言：', languageSaved: '界面语言已切换为{language}。',
     languageClosed: '语言菜单已关闭。', languageExpired: '语言菜单已失效，请重新打开 /language。',
     languageMenuFailed: '语言偏好已保存，但 Telegram 命令菜单更新失败。可重新选择语言再试；不会影响会话内容。',
     level_off: '关闭', level_minimal: '最低', level_low: '低', level_medium: '中', level_high: '高', level_xhigh: '超高', level_max: '最高', level_other: '其他等级（{value}）',
-    cmd_menu: '会话设置', cmd_model: '选择模型', cmd_thinking: '推理强度', cmd_language: '切换语言', cmd_rename: '同时重命名话题与会话', cmd_sessions: '会话列表', cmd_new: '当前话题开启新会话', cmd_topic: '查看或恢复会话', cmd_status: '查看状态', cmd_stop: '停止当前任务', cmd_help: '帮助',
+    cmd_menu: '会话设置', cmd_model: '选择模型', cmd_thinking: '推理强度', cmd_language: '切换语言', cmd_name: '同时修改话题与会话名称', cmd_sessions: '会话列表', cmd_new: '当前话题开启新会话', cmd_topic: '查看或恢复会话', cmd_status: '查看状态', cmd_stop: '停止当前任务', cmd_help: '帮助',
   },
   en: {
-    help: '/menu — session settings buttons\n/model, /models — choose provider and model\n/thinking, /reasoning — choose reasoning effort\n/language — change interface language\n/rename — rename topic and session together\n/topic — current binding (root: session list)\n/topic <session-id> — restore a session in this topic\n/sessions [page] — session list\n/new — fresh session in this topic, keep history\n/status — session status\n/stop — stop current run\n/help — help\nSend a normal root-DM message to create a new topic and session.',
+    help: '/menu — session settings buttons\n/model, /models — choose provider and model\n/thinking, /reasoning — choose reasoning effort\n/language — change interface language\n/name <new name> — rename topic and session together\n/topic — current binding (root: session list)\n/topic <session-id> — restore a session in this topic\n/sessions [page] — session list\n/new — fresh session in this topic, keep history\n/status — session status\n/stop — stop current run\n/help — help\nSend a normal root-DM message to create a new topic and session.',
     textOnly: 'This version accepts text only; attachments are not processed.',
     openSession: 'Open a topic and send a message or use /new first.', busy: 'Session is busy. Wait for it to finish or use /stop.',
     sessions: 'Sessions (page {page}/{pages}):\n{items}', none: '(none)', bound: 'bound', available: 'available',
@@ -93,13 +93,13 @@ export const messages = {
     rename: 'Rename topic and session',
     renamePrompt: 'Reply to this message with a new topic and session name (1–128 characters). This changes metadata only, without a model call. Reply /cancel to cancel.',
     renamePlaceholder: 'New name', renameInvalid: 'Names must contain 1–128 characters. Open Rename again and enter a new name.',
-    renameExpired: 'Rename request expired or the session changed. Open /rename again.', renameCancelled: 'Rename cancelled.',
+    renameExpired: 'Rename request expired or the session changed. Open /name again.', renameCancelled: 'Rename cancelled.',
     renameFailed: 'Telegram rejected the rename. Check the topic and permissions before trying again. No model request was made.',
     language: 'Language', languageTitle: 'Interface language: {language}\nChoose a language:', languageSaved: 'Interface language changed to {language}.',
     languageClosed: 'Language menu closed.', languageExpired: 'Language menu expired. Reopen /language.',
     languageMenuFailed: 'Language preference saved, but the Telegram command menu update failed. Select it again to retry; conversation content is unchanged.',
     level_off: 'off', level_minimal: 'minimal', level_low: 'low', level_medium: 'medium', level_high: 'high', level_xhigh: 'xhigh', level_max: 'max', level_other: 'Other level ({value})',
-    cmd_menu: 'Session settings', cmd_model: 'Choose model', cmd_thinking: 'Reasoning effort', cmd_language: 'Change language', cmd_rename: 'Rename topic and session', cmd_sessions: 'List sessions', cmd_new: 'Fresh session in this topic', cmd_topic: 'View or restore session', cmd_status: 'Session status', cmd_stop: 'Stop current run', cmd_help: 'Help',
+    cmd_menu: 'Session settings', cmd_model: 'Choose model', cmd_thinking: 'Reasoning effort', cmd_language: 'Change language', cmd_name: 'Name topic and session', cmd_sessions: 'List sessions', cmd_new: 'Fresh session in this topic', cmd_topic: 'View or restore session', cmd_status: 'Session status', cmd_stop: 'Stop current run', cmd_help: 'Help',
   },
 };
 

@@ -36,41 +36,53 @@ function setup(t) {
 }
 
 test('rename dialog uses explicit replies and changes topic + session without a model call', async t => {
-  const x = setup(t); await x.command('/rename'); assert.match(x.replies[0].text, /不调用模型/);
+  const x = setup(t); await x.command('/name'); assert.match(x.replies[0].text, /不调用模型/);
   await x.reply('我的新标题');
   assert.deepEqual(x.renamed, [[42, 11, '我的新标题']]); assert.deepEqual(x.names, ['我的新标题']);
   assert.equal(x.state.current(42, 11).title, '我的新标题');
   assert.equal(x.sent.at(-1)[2], '会话名称已同步为：我的新标题');
   assert.equal(x.modelCalls(), 0);
 });
-test('direct /rename works even if the requested title is already stored', async t => {
-  const x = setup(t); await x.command('/rename 旧名称');
+test('direct /name works even if the requested title is already stored', async t => {
+  const x = setup(t); await x.command('/name 旧名称');
   assert.equal(x.renamed.length, 1); assert.equal(x.names.length, 1); assert.equal(x.modelCalls(), 0);
+  assert.equal(x.replies.length, 0);
+});
+test('/name remains a direct command even when replying to an old rename dialog', async t => {
+  const x = setup(t); await x.command('/name');
+  await x.reply('/name 只用这个名称');
+  assert.equal(x.names.at(-1), '只用这个名称'); assert.equal(x.renamed.at(-1)[2], '只用这个名称');
+  assert.equal(x.modelCalls(), 0);
+});
+test('/rename is no longer a command and never invokes the model', async t => {
+  const x = setup(t); await x.command('/rename 新名称');
+  assert.equal(x.renamed.length, 0); assert.equal(x.modelCalls(), 0);
+  assert.match(x.sent.at(-1)[2], /未知命令/);
 });
 test('explicit rename requests are confirmed even when matching an in-flight bot target', async t => {
   const x = setup(t); x.g.topicTitles.namingTargets.set('s1', '同一目标');
-  await x.command('/rename 同一目标');
+  await x.command('/name 同一目标');
   assert.equal(x.names.at(-1), '同一目标'); assert.match(x.sent.at(-1)[2], /已同步为/);
 });
 test('invalid names and cancelled dialogs never invoke the model or change titles', async t => {
-  const x = setup(t); await x.command('/rename'); await x.reply('/cancel');
+  const x = setup(t); await x.command('/name'); await x.reply('/cancel');
   assert.match(x.sent.at(-1)[2], /已取消/);
-  await x.command('/rename ' + '名'.repeat(129)); assert.match(x.sent.at(-1)[2], /1–128/);
+  await x.command('/name ' + '名'.repeat(129)); assert.match(x.sent.at(-1)[2], /1–128/);
   assert.equal(x.renamed.length, 0); assert.equal(x.modelCalls(), 0);
 });
 test('stale or restarted reply prompts are rejected instead of becoming Agent instructions', async t => {
-  const x = setup(t); await x.command('/rename'); x.g.renames.requests.clear();
+  const x = setup(t); await x.command('/name'); x.g.renames.requests.clear();
   await x.reply('不能执行的旧回复'); assert.match(x.sent.at(-1)[2], /已过期/); assert.equal(x.modelCalls(), 0);
-  await x.command('/rename'); x.state.data.bindings['42:11'] = 'other';
+  await x.command('/name'); x.state.data.bindings['42:11'] = 'other';
   await x.reply('旧会话名称'); assert.match(x.sent.at(-1)[2], /已过期/); assert.equal(x.renamed.length, 0);
 });
 test('wrong users cannot use another user rename dialog', async t => {
-  const x = setup(t); await x.command('/rename');
+  const x = setup(t); await x.command('/name');
   await x.reply('不允许', { from: { id: 99 } });
   assert.equal(x.renamed.length, 0); assert.equal(x.modelCalls(), 0);
 });
 test('local occupation defers both changes and synchronizes when released', async t => {
-  const x = setup(t); x.setBusy(true); await x.command('/rename 等待释放');
+  const x = setup(t); x.setBusy(true); await x.command('/name 等待释放');
   assert.equal(x.renamed.length, 0); assert.equal(x.names.length, 0);
   assert.match(x.sent.at(-1)[2], /已记录待同步/);
   x.setBusy(false); await x.g.topicTitles.flushAll();
@@ -78,7 +90,7 @@ test('local occupation defers both changes and synchronizes when released', asyn
 });
 test('permanent Telegram rejection does not write a false session name or retry endlessly', async t => {
   const x = setup(t); x.telegram.rename = async () => { throw Object.assign(new Error('SECRET'), { code: 400 }); };
-  await x.command('/rename 被拒绝'); assert.equal(x.names.length, 0);
+  await x.command('/name 被拒绝'); assert.equal(x.names.length, 0);
   assert.equal(x.state.current(42, 11).title, '旧名称'); assert.equal(x.state.current(42, 11).pendingTopicTitle, undefined);
   assert.match(x.sent.at(-1)[2], /Telegram 拒绝/); assert.doesNotMatch(x.sent.at(-1)[2], /SECRET/);
 });
@@ -88,7 +100,7 @@ test('active SDK lease is held until an in-flight explicit rename completes', as
   x.telegram.rename = async () => new Promise(resolve => { finishRename = resolve; });
   await x.command('正常对话'); await tick();
   const job = x.g.active.get('s1');
-  const renaming = x.command('/rename 正在同步'); await tick();
+  const renaming = x.command('/name 正在同步'); await tick();
   finishPrompt('回复'); await tick(); assert.equal(disposed, false);
   finishRename(); await renaming; await job.promise;
   assert.equal(disposed, true); assert.equal(x.names.at(-1), '正在同步');
@@ -96,7 +108,7 @@ test('active SDK lease is held until an in-flight explicit rename completes', as
 test('finalizing SDKs are never borrowed for new rename operations', async t => {
   const x = setup(t);
   x.g.active.set('s1', { finalizing: true, agent: { setTitle() { throw new Error('must not use'); } } });
-  await x.command('/rename 等待结束'); assert.equal(x.renamed.length, 0);
+  await x.command('/name 等待结束'); assert.equal(x.renamed.length, 0);
   x.g.active.delete('s1'); await x.g.topicTitles.flushAll(); assert.equal(x.names.at(-1), '等待结束');
 });
 test('Telegram rename treats only TOPIC_NOT_MODIFIED as idempotent success', async t => {

@@ -93,7 +93,7 @@ export class Gateway {
         if (record && !this.active.has(record.id)) return this.controls.show(record, chat, thread, user);
         return this.languages.show(chat, thread, user);
       }
-      if (command === 'rename') return arg ? this.renames.apply(record, chat, thread, user, arg) : this.renames.show(record, chat, thread, user);
+      if (command === 'name') return arg ? this.renames.apply(record, chat, thread, user, arg) : this.renames.show(record, chat, thread, user);
       if (['language', 'lang'].includes(command) || (command === 'menu' && !record)) return this.languages.show(chat, thread, user);
       if (['menu', 'model', 'models', 'thinking', 'reasoning'].includes(command)) {
         if (!record || record.user !== user) return say(t('openSession'));

@@ -100,7 +100,7 @@ export class Telegram {
     return this.call('answerCallbackQuery', { callback_query_id: query, text });
   }
   async registerCommands(language = 'zh', chat) {
-    const commands = ['menu', 'model', 'thinking', 'rename', 'language', 'sessions', 'new', 'topic', 'status', 'stop', 'help']
+    const commands = ['menu', 'model', 'thinking', 'name', 'language', 'sessions', 'new', 'topic', 'status', 'stop', 'help']
       .map(command => ({ command, description: translate(language, `cmd_${command}`) }));
     await this.call('setMyCommands', { commands, ...(chat ? { scope: { type: 'chat', chat_id: chat } } : {}) });
     await this.call('setChatMenuButton', { ...(chat ? { chat_id: chat } : {}), menu_button: { type: 'commands' } });

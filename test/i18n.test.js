@@ -131,6 +131,8 @@ test('command descriptions default to Chinese and language switching uses chat-s
   api.call = async (method, params) => calls.push([method, params]);
   await api.registerCommands(); assert.ok(calls[0][1].commands.every(c => /[\u4e00-\u9fff]/.test(c.description)));
   assert.ok(calls[0][1].commands.some(c => c.command === 'language'));
+  assert.ok(calls[0][1].commands.some(c => c.command === 'name'));
+  assert.ok(!calls[0][1].commands.some(c => c.command === 'rename'));
   await api.registerCommands('en', 42);
   assert.deepEqual(calls[2][1].scope, { type: 'chat', chat_id: 42 });
   assert.ok(calls[2][1].commands.every(c => !/[\u4e00-\u9fff]/.test(c.description)));

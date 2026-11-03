@@ -21,6 +21,10 @@ export class RenameControls {
   async handleReply(message, record, chat, thread, user) {
     const g = this.gateway, key = this.key(user, chat, thread), request = this.requests.get(key);
     const reply = message.reply_to_message;
+    if (typeof message.text === 'string' && message.text !== '/cancel' && /^\/[a-z_]+(?:@\w+)?(?:\s|$)/i.test(message.text)) {
+      this.requests.delete(key); // Explicit commands win over a lingering reply dialog.
+      return false;
+    }
     const ownOldPrompt = Number.isSafeInteger(g.state.data.botId) && reply?.from?.id === g.state.data.botId &&
       [translate('zh', 'renamePrompt'), translate('en', 'renamePrompt')].includes(reply?.text);
     if (!reply || (reply.message_id !== request?.messageId && !ownOldPrompt)) return false;
