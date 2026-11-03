@@ -1,0 +1,21 @@
+# System-wide unit template. Edit every /home/pi path and User before installing.
+[Unit]
+Description=pi Telegram private-topic gateway
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/workspace
+Environment=PI_TELEGRAM_CONFIG=/home/pi/.config/pi-telegram-gateway/config.json
+ExecStart=/usr/bin/node /home/pi/pi-telegram-gateway/bin/cli.js start
+UMask=0077
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+# A hard kill leaves an intentional stale lock: inspect it before restarting.
+# This service is NOT a sandbox. Restrict the OS account's files and credentials.
+
+[Install]
+WantedBy=multi-user.target
