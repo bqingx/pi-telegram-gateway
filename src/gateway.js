@@ -39,7 +39,25 @@ export class Gateway {
     this.state.bind(chat, thread, info.id, user);
     return record;
   }
+  async handleTopicRename(update) {
+    const edited = !!update.edited_message;
+    const m = update.edited_message || update.message;
+    const name = m?.forum_topic_edited?.name ?? (edited ? m?.forum_topic_created?.name : undefined);
+    if (this.closing || typeof name !== 'string' || m.chat?.type !== 'private' || !this.allowed.has(m.chat.id)) return false;
+    if (m.forward_origin || m.forward_from || m.forward_date || m.forward_sender_name || m.is_automatic_forward) return false;
+    const owner = m.chat.id;
+    const human = m.from?.id === owner && !m.from?.is_bot;
+    // A private topic header can be an edited bot-authored creation message.
+    // This exception is only for trusted service metadata, never text/prompts.
+    const ownEditedHeader = edited && Number.isSafeInteger(this.state.data.botId) && m.from?.is_bot && m.from.id === this.state.data.botId;
+    if (!human && !ownEditedHeader) return false;
+    let thread = m.message_thread_id === 1 ? undefined : m.message_thread_id;
+    if (!thread && edited && this.state.current(owner, m.message_id)) thread = m.message_id;
+    if (thread) await this.topicTitles.changed(owner, thread, owner, name);
+    return true;
+  }
   async handle(update) {
+    if (await this.handleTopicRename(update)) return;
     if (update.callback_query) return update.callback_query.data?.startsWith('pl:') ? this.languages.callback(update.callback_query) : this.controls.callback(update.callback_query);
     const m = update.message;
     if (this.closing || !m || m.chat?.type !== 'private' || m.from?.is_bot || !this.allowed.has(m.from?.id)) return;

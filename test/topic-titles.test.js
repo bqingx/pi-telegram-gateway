@@ -60,6 +60,22 @@ test('bot echo, icon-only edits, unbound topics and unauthorized edits do not lo
   await x.g.handle(x.edited('unbound', { message_thread_id: 99 }));
   assert.equal(x.names.get('s0'), '原始名称'); assert.equal(x.sent.length, 0);
 });
+test('edited bot-authored private topic header renames its bound session without admitting bot prompts', async t => {
+  const x = setup(t); x.seed(); x.state.data.botId = 1234;
+  await x.g.handle({ edited_message: { from: { id: 1234, is_bot: true }, chat: { id: 42, type: 'private' }, message_thread_id: 11, message_id: 11, forum_topic_created: { name: '私聊标题编辑' } } });
+  assert.equal(x.names.get('s0'), '私聊标题编辑'); assert.match(x.sent.at(-1)[2], /会话名称已同步/);
+  await x.g.handle({ edited_message: { from: { id: 1234, is_bot: true }, chat: { id: 42, type: 'private' }, text: 'do not run this' } });
+  assert.equal(x.prompts.length, 0);
+});
+test('edited topic service messages use known creation message IDs only when thread ID is absent', async t => {
+  const x = setup(t); x.seed(); x.state.data.botId = 1234;
+  const header = name => ({ edited_message: { from: { id: 1234, is_bot: true }, chat: { id: 42, type: 'private' }, message_id: 11, forum_topic_edited: { name } } });
+  await x.g.handle(header('无显式话题ID')); assert.equal(x.names.get('s0'), '无显式话题ID');
+  const forwarded = header('转发不能改名'); forwarded.edited_message.forward_origin = { type: 'user' };
+  await x.g.handle(forwarded); assert.equal(x.names.get('s0'), '无显式话题ID');
+  const foreign = header('其他机器人'); foreign.edited_message.from.id = 999;
+  await x.g.handle(foreign); assert.equal(x.names.get('s0'), '无显式话题ID');
+});
 test('occupied local session queues the newest title and auto-syncs when released', async t => {
   const x = setup(t); x.seed(); x.setBusy(true);
   await x.g.handle(x.edited('第一个名称')); await x.g.handle(x.edited('最终名称'));

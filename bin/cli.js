@@ -6,6 +6,7 @@ import { State } from '../src/state.js';
 import { Telegram } from '../src/telegram.js';
 import { PiBackend } from '../src/pi.js';
 import { Gateway } from '../src/gateway.js';
+import { updateMetadata, TELEGRAM_UPDATES } from '../src/update-diagnostics.js';
 
 process.umask(0o077);
 const configPath = resolve(process.env.PI_TELEGRAM_CONFIG || join(homedir(), '.config/pi-telegram-gateway/config.json'));
@@ -73,7 +74,7 @@ async function main() {
     while (!stopping) {
       let updates;
       try {
-        updates = await telegram.call('getUpdates', { offset: state.data.offset, timeout: 25, allowed_updates: ['message', 'callback_query'] }, controller.signal);
+        updates = await telegram.call('getUpdates', { offset: state.data.offset, timeout: 25, allowed_updates: TELEGRAM_UPDATES }, controller.signal);
         failures = 0;
       } catch {
         if (stopping) break;
@@ -84,6 +85,7 @@ async function main() {
       for (const update of updates) {
         if (stopping) break;
         if (update.update_id < state.data.offset) continue;
+        if (config.diagnostics === true) console.log(JSON.stringify(updateMetadata(update, state.data.botId)));
         // Durable admission BEFORE effects: crash recovery never blindly reruns tools.
         // This is at-most-once admission, not exactly-once processing/delivery.
         state.data.offset = update.update_id + 1;

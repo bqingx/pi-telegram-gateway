@@ -8,7 +8,7 @@ A standalone Telegram gateway for [pi](https://github.com/earendil-works/pi). In
 
 ## Status
 
-Early **0.5.0** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
+Early **0.5.1** implementation. Automated fake-Telegram routing/inline-picker tests and real SDK storage/model/thinking persistence tests pass. **Live Telegram delivery and a real model/tool turn have not yet been verified.** No npm release has been published; install from source for now. This is not full Hermes feature parity.
 
 ## Install
 
@@ -91,7 +91,7 @@ Accepted text prompts immediately start a Telegram **typing** indicator, refresh
 
 New topics start with a short local placeholder, then the first real prompt generates one concise title (at most 24 Unicode characters) using the session's selected model. The **same title** names the Telegram topic and native pi session (`session_info`). `/new` defers this until its first message. The separate, tool-free title request contains only a sanitized, bounded first message (at most 2000 characters), is limited to 128 output tokens / approximately six seconds, and records returned usage as a `title` usage entry. It costs an additional short model request and can consume subscription quota; it is not free by assumption. It does not enter conversation history or execute tools. Failure/empty output uses a local short-title fallback; Telegram/filesystem name-sync failures are reported without repeating the user's prompt. Existing sessions are not retroactively auto-titled.
 
-When an authorized user **edits a bound topic's name in Telegram**, the session name follows and the bot explicitly confirms it. This metadata-only operation makes no model request. A manual name is not truncated to the automatic 24-character limit. Manual renames take priority over a pending automatic title. Bot echoes, icon-only edits and unbound/unauthorized topic edits are ignored. If the native session is occupied, the pending name is persisted and a localized notice explains it is not yet synchronized; a two-second reconciler applies the latest pending name when the lock is released, then confirms success. Pending metadata can resume after gateway restart, without replaying any prompt or tools, and is discarded if that session is no longer bound to the original topic. A Telegram topic rename is one-way metadata sync; native-side renames do not automatically rename Telegram topics.
+Manual topic rename synchronization is **best-effort and still needs live-client verification**: it depends on Telegram actually delivering name metadata. The gateway subscribes to `message` and `edited_message`, handles `forum_topic_edited` plus edited private-topic creation headers (including bot-authored headers from this bot in the allowlisted owner's private chat), and never runs ordinary edited text as a new prompt. When an authorized user **edits a bound topic's name in Telegram** and that metadata is received, the session name follows and the bot explicitly confirms it. This metadata-only operation makes no model request. A manual name is not truncated to the automatic 24-character limit. Manual renames take priority over a pending automatic title. Bot echoes, icon-only edits and unbound/unauthorized topic edits are ignored. If the native session is occupied, the pending name is persisted and a localized notice explains it is not yet synchronized; a two-second reconciler applies the latest pending name when the lock is released, then confirms success. Pending metadata can resume after gateway restart, without replaying any prompt or tools, and is discarded if that session is no longer bound to the original topic. A Telegram topic rename is one-way metadata sync; native-side renames do not automatically rename Telegram topics.
 
 Initial output is final assistant text, split into Telegram-safe plain-text chunks; reasoning, tool calls, tool output and raw exceptions are not forwarded.
 
@@ -140,6 +140,10 @@ Sidecars are `<session.jsonl>.pi-shared.json` (enrollment) and `<session.jsonl>.
 Only private messages from the numeric allowlist are admitted; groups, edits and bots are ignored. Do not allow an unknown user to enroll simply by messaging first. Bot token URLs, raw provider errors and internal tool logs are not intentionally logged/sent, but model replies themselves can contain sensitive content: review the workspace/profile you expose. No telemetric service or extra API credentials are required.
 
 Before using financial tools, install your own fail-closed policy/approval extensions and verify them headlessly. The gateway itself does **not** enforce the operator's wallet policies.
+
+### Optional update diagnostics
+
+Set `"diagnostics": true` in the private gateway config and restart to log update/message **field names**, update/message/thread IDs, sender/bot flags and topic-name **length**. Message text, actual topic names, callback data, credentials and raw API errors are not logged. This is off by default and useful for checking whether a client-delivered rename is a new service message, an edited header, or absent from the Bot API feed. If no name metadata is delivered, the gateway cannot infer a renamed topic from the update ID alone. Do not assume a passing fake-update test proves real Telegram delivery.
 
 ## Development
 
